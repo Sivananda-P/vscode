@@ -1,0 +1,313 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { Emitter, Event } from '../../../../base/common/event.js';
+import { VSBuffer } from '../../../../base/common/buffer.js';
+import { ISemanticContextService, ISemanticSearchResult, ILayeredContext, IPosition, SemanticIndexStatus } from '../common/semanticContext.js';
+import { IEmbeddingProvider } from '../common/embeddings.js';
+import { IVectorStoreService } from '../common/vectorStore.js';
+import { SemanticIndexer } from '../common/semanticIndexer.js';
+
+import { DependencyGraph } from '../common/dependencyGraph.js';
+import { ContextRetriever } from '../common/contextRetriever.js';
+import { ContextRanker } from '../common/contextRanker.js';
+import { CursorContextExtractor } from '../common/cursorContext.js';
+import { PromptAssembler } from '../common/promptAssembler.js';
+import { IndexWatcher } from './indexWatcher.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
+import { IOutlineModelService } from '../../../../editor/contrib/documentSymbols/browser/outlineModel.js';
+import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
+import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { URI } from '../../../../base/common/uri.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+
+export class SemanticContextService extends Disposable implements ISemanticContextService {
+	declare readonly _serviceBrand: undefined;
+
+	// ── Status ───────────────────────────────────────────────────────────────
+	private readonly _onDidChangeStatus = this._register(new Emitter<SemanticIndexStatus>());
+	readonly onDidChangeStatus: Event<SemanticIndexStatus> = this._onDidChangeStatus.event;
+
+	private _status: SemanticIndexStatus = 'idle';
+	get status(): SemanticIndexStatus { return this._status; }
+	private setStatus(s: SemanticIndexStatus): void {
+		if (this._status !== s) {
+			this._status = s;
+			this._onDidChangeStatus.fire(s);
+		}
+	}
+
+	// ── Core components ───────────────────────────────────────────────────────
+	private readonly indexer: SemanticIndexer;
+	private readonly dependencyGraph: DependencyGraph;
+
+	private _retriever: ContextRetriever | undefined;
+	private readonly ranker: ContextRanker;
+	private readonly cursorExtractor: CursorContextExtractor;
+	private readonly promptAssembler: PromptAssembler;
+
+	// ── Telemetry ─────────────────────────────────────────────────────────────
+	private filesIndexed = 0;
+	private chunksCreated = 0;
+
+	constructor(
+		@IEmbeddingProvider private readonly embeddingProvider: IEmbeddingProvider,
+		@IFileService private readonly fileService: IFileService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+		@ILogService private readonly logService: ILogService,
+		@IOutlineModelService outlineModelService: IOutlineModelService,
+		@ITextModelService textModelService: ITextModelService,
+		@ILanguageFeaturesService languageFeaturesService: ILanguageFeaturesService,
+		@IInstantiationService instantiationService: IInstantiationService,
+		@IVectorStoreService private readonly vectorStore: IVectorStoreService
+	) {
+
+		super();
+
+		this.indexer = instantiationService.createInstance(SemanticIndexer);
+		this.dependencyGraph = instantiationService.createInstance(DependencyGraph);
+		this.cursorExtractor = instantiationService.createInstance(CursorContextExtractor);
+		this.ranker = new ContextRanker();
+		this.promptAssembler = new PromptAssembler();
+
+		// IndexWatcher is created later when vectorStore is ready
+		// (We use a placeholder indexWatcher that will be initialized in ensureVectorStore)
+		// IndexWatcher is created later when vectorStore is ready
+		// (We use a placeholder indexWatcher that will be initialized in ensureVectorStore)
+		this._register(
+			instantiationService.createInstance(
+				IndexWatcher,
+				(uri: URI) => this.reindexFile(uri)
+			)
+		);
+	}
+
+	// ── VectorStore lazy init ─────────────────────────────────────────────────
+
+	private async ensureVectorStore(): Promise<IVectorStoreService> {
+		if (!this._retriever) {
+			await this.vectorStore.init();
+			// Wire retriever now that store is available
+			this._retriever = new ContextRetriever(
+				this.embeddingProvider,
+				this.vectorStore,
+				this.dependencyGraph,
+				this.logService
+			);
+		}
+		return this.vectorStore;
+	}
+
+
+	private get retrieverInstance(): ContextRetriever {
+		if (!this._retriever) {
+			throw new Error('ContextRetriever not ready — call ensureVectorStore first');
+		}
+		return this._retriever;
+	}
+
+	// ── Workspace Indexing ────────────────────────────────────────────────────
+
+	async indexWorkspace(token: CancellationToken): Promise<void> {
+		this.setStatus('building');
+		const folders = this.workspaceContextService.getWorkspace().folders;
+
+		const t0 = Date.now();
+		this.filesIndexed = 0;
+		this.chunksCreated = 0;
+
+		try {
+			const store = await this.ensureVectorStore();
+			for (const folder of folders) {
+				await this.indexFolder(folder.uri, store, token, true);
+			}
+
+			// Rebuild index once after all files are in the DB
+			this.logService.info('SemanticContextService: final index rebuild...');
+			await store.rebuildIndex();
+
+			const elapsed = Date.now() - t0;
+			this.logService.info(
+				`SemanticContextService: indexed ${this.filesIndexed} files, ` +
+				`${this.chunksCreated} chunks in ${elapsed}ms`
+			);
+			this.setStatus('ready');
+		} catch (err) {
+			this.logService.error(`SemanticContextService: indexWorkspace failed: ${err}`);
+			this.setStatus('error');
+			throw err;
+		}
+	}
+
+	private async indexFolder(uri: URI, store: IVectorStoreService, token: CancellationToken, isBulk = false): Promise<void> {
+		const stat = await this.fileService.resolve(uri);
+		if (!stat.children) return;
+		// Parallelize with a small limit to avoid hammering the disk/CPU too hard on i3
+		const concurrencyLimit = 5;
+		for (let i = 0; i < stat.children.length; i += concurrencyLimit) {
+			if (token.isCancellationRequested) return;
+			const batch = stat.children.slice(i, i + concurrencyLimit);
+			await Promise.all(batch.map(async child => {
+				if (child.isDirectory) {
+					if (!this.isIgnoredDir(child.name)) {
+						await this.indexFolder(child.resource, store, token, isBulk);
+					}
+				} else {
+					await this.reindexFile(child.resource, isBulk);
+				}
+			}));
+		}
+	}
+
+	/** Re-index a single file (called by IndexWatcher and on initial index). */
+	async reindexFile(uri: URI, skipIndexUpdate = false): Promise<void> {
+		if (!this.isSupportedFile(uri)) return;
+		const store = await this.ensureVectorStore();
+
+		const wasPreviouslyReady = this._status === 'ready';
+		if (wasPreviouslyReady) this.setStatus('updating');
+
+		const t0 = Date.now();
+		try {
+			const chunks = await this.indexer.indexFile(uri, CancellationToken.None);
+			if (chunks.length === 0) return;
+
+			const embeddings = await this.embeddingProvider.provideEmbeddings(
+				chunks.map(c => c.text), CancellationToken.None
+			);
+			const binaryEmbeddings = embeddings.map(e => VSBuffer.wrap(new Uint8Array(e.buffer, e.byteOffset, e.byteLength)));
+
+			await store.deleteChunks(uri, skipIndexUpdate);
+			await store.addChunks(chunks, binaryEmbeddings, skipIndexUpdate);
+
+			// Update dependency graph
+			this.dependencyGraph.removeFile(uri);
+			this.dependencyGraph.addChunks(chunks);
+			await this.dependencyGraph.resolveImportsForFile(uri, CancellationToken.None);
+
+			this.filesIndexed++;
+			this.chunksCreated += chunks.length;
+			this.logService.trace(
+				`SemanticContextService: reindexFile ${uri.fsPath} → ${chunks.length} chunks in ${Date.now() - t0}ms`
+			);
+
+			if (wasPreviouslyReady) this.setStatus('ready');
+		} catch (err) {
+			this.logService.error(`SemanticContextService: reindexFile failed for ${uri.toString()}: ${err}`);
+			if (wasPreviouslyReady) this.setStatus('ready');
+		}
+	}
+
+	// ── Search ────────────────────────────────────────────────────────────────
+
+	async search(query: string, token: CancellationToken): Promise<ISemanticSearchResult[]> {
+		const store = await this.ensureVectorStore();
+		const [queryEmb] = await this.embeddingProvider.provideEmbeddings([query], token);
+		const queryBuffer = VSBuffer.wrap(new Uint8Array(queryEmb.buffer, queryEmb.byteOffset, queryEmb.byteLength));
+		return store.search(queryBuffer, 10);
+	}
+
+	// ── Layered Context ───────────────────────────────────────────────────────
+
+	async getLayeredContext(uri: URI, position: IPosition, prompt: string, token: CancellationToken, onProgress?: (result: ILayeredContext) => void): Promise<ILayeredContext> {
+		await this.ensureVectorStore();
+
+		const t0 = Date.now();
+
+		// Extract cursor context
+		const cursorContext = await this.cursorExtractor.extract(uri, position, token);
+
+		// Build query from prompt + current symbol name
+		const query = cursorContext.currentSymbol
+			? `${prompt} ${cursorContext.currentSymbol.name}`
+			: prompt;
+
+		// Local ranking function to avoid code duplication
+		const rankAndAssemble = async (semanticMatches: ISemanticSearchResult[], dependencyContext: ISemanticSearchResult[], relatedFiles: URI[], isFinal: boolean): Promise<ILayeredContext> => {
+			const fileMtimes = await this.vectorStore!.getFileMtimes();
+			const ranked = this.ranker.rankAll(semanticMatches, dependencyContext, fileMtimes);
+
+			const assembled = this.promptAssembler.assemble(
+				prompt,
+				cursorContext,
+				ranked,
+				dependencyContext
+			);
+
+			return {
+				cursorContext,
+				semanticMatches: ranked,
+				dependencyContext,
+				relatedFiles,
+				assembledPrompt: assembled.text,
+				tokenEstimate: assembled.tokenEstimate,
+				isFinal
+			};
+		};
+
+		// Retrieve
+		const fullRetrievalPromise = this.retrieverInstance.retrieve(
+			query,
+			cursorContext,
+			token,
+			10,
+			async (partial) => {
+				if (onProgress) {
+					const partialCtx = await rankAndAssemble(partial.semanticMatches, partial.dependencyContext, partial.relatedFiles, false);
+					onProgress(partialCtx);
+				}
+			}
+		);
+
+		const { semanticMatches, dependencyContext, relatedFiles } = await fullRetrievalPromise;
+
+		const finalCtx = await rankAndAssemble(semanticMatches, dependencyContext, relatedFiles, true);
+
+		this.logService.trace(
+			`SemanticContextService: getLayeredContext in ${Date.now() - t0}ms, ` +
+			`${finalCtx.semanticMatches.length} chunks, ~${finalCtx.tokenEstimate} tokens`
+		);
+
+		return finalCtx;
+	}
+
+	/** Legacy — returns assembled prompt string. */
+	async getContext(uri: URI, position: IPosition, token: CancellationToken): Promise<string> {
+		const ctx = await this.getLayeredContext(uri, position, `Context for ${uri.fsPath}`, token);
+		return ctx.assembledPrompt;
+	}
+
+	// ── Telemetry / Debug  ────────────────────────────────────────────────────
+
+	getMetrics() {
+		return {
+			filesIndexed: this.filesIndexed,
+			chunksCreated: this.chunksCreated,
+			graphNodes: this.dependencyGraph.nodeCount,
+			graphEdges: this.dependencyGraph.edgeCount,
+			embeddingDimension: this.embeddingProvider.embeddingDimension
+		};
+	}
+
+	// ── Helpers ───────────────────────────────────────────────────────────────
+
+	private isSupportedFile(uri: URI): boolean {
+		const ext = uri.path.split('.').pop()?.toLowerCase();
+		return ['ts', 'js', 'py', 'java', 'go', 'cpp', 'c', 'cs', 'rs', 'tsx', 'jsx'].includes(ext ?? '');
+	}
+
+	private isIgnoredDir(name: string): boolean {
+		return ['node_modules', '.git', 'out', 'dist', '.build', 'coverage'].includes(name);
+	}
+
+	override dispose(): void {
+		void this.vectorStore?.close();
+		super.dispose();
+	}
+}

@@ -1,0 +1,141 @@
+# Cursor-Style Context Engine — Architecture
+
+A layered semantic code intelligence system built into the VS Code fork.
+
+---
+
+## Architecture Overview
+
+```
+Workspace Files
+      │
+      ▼
+SemanticIndexer (AST + fallback chunking)
+      │ ICodeChunk { id, symbolName, symbolType, ... }
+      ▼
+IEmbeddingProvider ─── OllamaEmbeddingProvider (local)
+      │                 RemoteAPIEmbeddingProvider (OpenAI-compat)
+      │                 MockEmbeddingProvider (dev/test)
+      ▼
+VectorStore (SQLite – semantic_context_v2.vscdb)
+      │ cosine similarity search
+      ▼
+DependencyGraph ◄─── ILanguageFeaturesService
+      │ BFS symbol expansion
+      ▼
+ContextRetriever
+      │  1. embed query
+      │  2. top-K vector search
+      │  3. dependency graph expand
+      │  4. cursor-local context
+      │  5. deduplication
+      ▼
+ContextRanker
+      │  score = 0.60×semantic + 0.25×dependency + 0.10×recency + 0.05×importance
+      │  → 6-12 chunks
+      ▼
+PromptAssembler   ◄─── CursorContextExtractor
+      │  token-budget-aware (8000 tokens)
+      │  [System] [Cursor] [Semantic] [Deps] [UserPrompt]
+      ▼
+ILayeredContext
+      │  assembledPrompt, semanticMatches, dependencyContext, ...
+      ▼
+AI Completion / Chat / Edit
+
+
+Background: IndexWatcher (file changes → incremental re-index, 500ms debounce)
+Status Bar: $(sync~spin) Building  |  $(check) Ready  |  $(lightbulb~spin) Updating
+```
+
+---
+
+## File Map
+
+| File | Purpose |
+|---|---|
+| `common/semanticContext.ts` | Core interfaces: `ISemanticContextService`, `ILayeredContext`, `ICursorContext` |
+| `common/semanticIndexer.ts` | AST + fallback chunking, `getSymbolAtPosition` |
+| `common/embeddings.ts` | `IEmbeddingProvider` interface |
+| `common/mockEmbeddings.ts` | Deterministic mock (dev/test) with LRU cache |
+| `common/dependencyGraph.ts` | BFS symbol graph, `getRelatedSymbols(id, depth)` |
+| `common/contextRetriever.ts` | 5-stage retrieval pipeline |
+| `common/contextRanker.ts` | Composite scoring, 6-12 chunk limit |
+| `common/cursorContext.ts` | Symbol hierarchy, imports, ±20 surrounding lines |
+| `common/promptAssembler.ts` | Token-budget-aware 5-section prompt builder |
+| `common/vectorStore.ts` | `IVectorStoreService` interface |
+| `common/vectorStoreIpc.ts` | `VectorStoreChannel` for IPC |
+| `browser/vectorStoreService.ts` | `VectorStoreServiceClient` proxy |
+| `node/vectorStoreService.ts` | SQLite implementation in Shared Process |
+| `browser/embeddingProviders/ollamaEmbeddingProvider.ts` | Ollama REST + LRU cache |
+| `browser/embeddingProviders/remoteAPIEmbeddingProvider.ts` | OpenAI-compat REST + batch + LRU |
+| `browser/indexWatcher.ts` | File change debouncer (500ms) |
+| `browser/semanticContextService.ts` | Orchestrator — wires all layers |
+| `browser/semanticContext.contribution.ts` | VS Code registration, status bar, commands |
+
+---
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `semantic.reindexWorkspace` | Full workspace re-index with progress notification |
+| `semantic.search` | Direct vector search, returns results array |
+| `semantic.debugContext` | Dump full layered context for current cursor to Output panel |
+
+---
+
+## Configuration / Switching Embedding Providers
+
+### Use Ollama (recommended for privacy)
+
+1. Install: `ollama pull nomic-embed-text && ollama serve`
+2. In `semanticContext.contribution.ts`, change:
+
+```typescript
+// Replace:
+registerSingleton(IEmbeddingProvider, MockEmbeddingProvider, ...);
+// With:
+registerSingleton(IEmbeddingProvider, OllamaEmbeddingProvider, ...);
+```
+
+### Use OpenAI
+
+```typescript
+registerSingleton(IEmbeddingProvider, RemoteAPIEmbeddingProvider, ...);
+// Then call configure() with your endpoint + API key
+```
+
+---
+
+## Scoring Formula
+
+```
+finalScore =
+  0.60 × semanticSimilarity    (cosine sim from vector search, 0-1)
+  0.25 × dependencyProximity   (BFS distance from cursor, 0-1)
+  0.10 × fileRecency           (normalised mtime, 0-1)
+  0.05 × fileImportance        (normalised import fan-in, 0-1)
+```
+
+---
+
+## Extending
+
+### Add a new embedding provider
+1. Implement `IEmbeddingProvider` in `browser/embeddingProviders/`
+2. Register with `registerSingleton(IEmbeddingProvider, MyProvider, ...)`
+
+### Add new graph edge types
+1. Extend `EdgeKind` in `dependencyGraph.ts`
+2. Add resolution logic in `resolveImportsForFile()` or a new `resolveXxx()` method
+3. Call the resolver in `SemanticContextService.reindexFile()`
+
+### Adjust ranking weights
+Edit the `W_*` constants in `contextRanker.ts`:
+```typescript
+private readonly W_SEMANTIC   = 0.60;
+private readonly W_DEPENDENCY = 0.25;
+private readonly W_RECENCY    = 0.10;
+private readonly W_IMPORTANCE = 0.05;
+```
