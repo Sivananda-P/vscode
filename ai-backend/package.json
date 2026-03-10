@@ -1,0 +1,33 @@
+{
+  "name": "ai-backend",
+  "version": "1.0.0",
+  "description": "Professional Backend for AI IDE",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@lancedb/lancedb": "^0.24.1",
+    "@lancedb/lancedb-linux-x64-gnu": "^0.26.2",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/body-parser": "^1.19.6",
+    "@types/connect": "^3.4.38",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/express-serve-static-core": "^5.1.1",
+    "@types/http-errors": "^2.0.5",
+    "@types/node": "^22.19.15",
+    "@types/range-parser": "^1.2.7",
+    "@types/send": "^1.2.1",
+    "@types/serve-static": "^2.2.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.3"
+  }
+}
