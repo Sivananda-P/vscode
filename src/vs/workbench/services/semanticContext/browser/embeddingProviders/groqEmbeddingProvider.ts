@@ -5,43 +5,35 @@
 
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { IEmbeddingProvider } from '../../common/embeddings.js';
+import { IAIService } from '../../../../../platform/ai/common/ai.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
-import { IRequestService, asText } from '../../../../../platform/request/common/request.js';
 
-export class GeminiEmbeddingProvider implements IEmbeddingProvider {
+import { Disposable } from '../../../../../base/common/lifecycle.js';
+
+export class GroqEmbeddingProvider extends Disposable implements IEmbeddingProvider {
 	declare readonly _serviceBrand: undefined;
 
-	readonly embeddingDimension = 768;
+	readonly embeddingDimension = 384;
 
 	constructor(
-		@IRequestService private readonly requestService: IRequestService,
+		@IAIService private readonly aiService: IAIService,
 		@ILogService private readonly logService: ILogService
-	) { }
+	) {
+		super();
+	}
 
 	async isAvailable(): Promise<boolean> {
 		return true; // Backend is assumed available or we can add a health check
 	}
 
 	async provideEmbeddings(texts: string[], token: CancellationToken): Promise<Float32Array[]> {
-		const backendUrl = 'http://localhost:3000/embeddings/index';
+		const backendUrl = 'http://127.0.0.1:3000/embeddings/index';
 
 		try {
-			const response = await this.requestService.request({
-				url: backendUrl,
-				type: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				data: JSON.stringify({
-					projectId: 'default_project',
-					chunks: texts.map(text => ({ text, metadata: {} }))
-				})
+			await this.aiService.request(backendUrl, {
+				projectId: 'default_project',
+				chunks: texts.map(text => ({ text, metadata: {} }))
 			}, token);
-
-			if (response.res.statusCode !== 200) {
-				const errorText = await asText(response);
-				throw new Error(`Backend embedding error (${response.res.statusCode}): ${errorText}`);
-			}
 
 			// Note: The backend currently stores the embeddings.
 			// In a full implementation, we might return them if the client needs them locally.
@@ -49,7 +41,7 @@ export class GeminiEmbeddingProvider implements IEmbeddingProvider {
 			return texts.map(() => new Float32Array(this.embeddingDimension).fill(0));
 
 		} catch (err) {
-			this.logService.error(`GeminiEmbeddingProvider: Backend call failed: ${err}`);
+			this.logService.error(`GroqEmbeddingProvider: Backend call failed: ${err}`);
 			return texts.map(() => new Float32Array(this.embeddingDimension).fill(0));
 		}
 	}

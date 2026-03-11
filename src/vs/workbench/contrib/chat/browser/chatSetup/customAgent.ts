@@ -11,7 +11,11 @@ import { IChatProgress } from '../../common/chatService/chatService.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ChatAgentLocation, ChatModeKind } from '../../common/constants.js';
 import { nullExtensionDescription } from '../../../../services/extensions/common/extensions.js';
-import { IRequestService, asText } from '../../../../../platform/request/common/request.js';
+import { IAIService } from '../../../../../platform/ai/common/ai.js';
+import { IFileService } from '../../../../../platform/files/common/files.js';
+import { ISemanticContextService } from '../../../../services/semanticContext/common/semanticContext.js';
+import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { VSBuffer } from '../../../../../base/common/buffer.js';
 
 export class CustomAgent extends Disposable implements IChatAgentImplementation {
 
@@ -20,7 +24,7 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 		const chatAgentService = instantiationService.invokeFunction(accessor => accessor.get(IChatAgentService));
 
 		const id = `custom.agent.${location}.${mode}`;
-		const name = 'Gemini AI';
+		const name = 'Groq AI';
 
 		disposables.add(chatAgentService.registerAgent(id, {
 			id,
@@ -31,7 +35,7 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 			slashCommands: [],
 			disambiguation: [],
 			locations: [location],
-			description: 'Powered by Google Gemini.',
+			description: 'Powered by Groq Llama 3.',
 			metadata: {
 				themeIcon: { id: 'sparkle' }
 			},
@@ -48,43 +52,80 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 	}
 
 	constructor(
-		@IRequestService private readonly requestService: IRequestService,
+		@IAIService private readonly aiService: IAIService,
+		@IFileService private readonly fileService: IFileService,
+		@ISemanticContextService private readonly semanticContextService: ISemanticContextService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super();
 	}
 
 	async invoke(request: IChatAgentRequest, progress: (parts: IChatProgress[]) => void, _history: IChatAgentHistoryEntry[], token: CancellationToken): Promise<IChatAgentResult> {
-		progress([{
-			kind: 'progressMessage',
-			content: new MarkdownString('Contacting AI Backend...'),
-		}]);
+		let messages: any[] = [];
+		let turnCount = 0;
+		const MAX_TURNS = 10;
 
 		try {
-			const backendUrl = 'http://localhost:3000/ai/query';
-			const response = await this.requestService.request({
-				url: backendUrl,
-				type: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				data: JSON.stringify({
-					prompt: request.message,
-					projectId: 'default_project' // In production, this would be the repo ID
-				})
-			}, token);
+			const backendUrl = 'http://127.0.0.1:3000/ai/query';
+			let prompt = request.message;
 
-			const result = await asText(response);
-			if (response.res.statusCode !== 200) {
-				throw new Error(`Backend error (${response.res.statusCode}): ${result}`);
+			while (turnCount < MAX_TURNS && !token.isCancellationRequested) {
+				turnCount++;
+
+				const json = await this.aiService.request(backendUrl, {
+					prompt: messages.length === 0 ? prompt : undefined,
+					messages: messages,
+					projectId: 'default_project'
+				}, token);
+
+				const { response, tool_calls } = json;
+
+				if (response) {
+					progress([{ kind: 'markdownContent', content: new MarkdownString(response) }]);
+					messages.push({ role: 'assistant', content: response });
+				}
+
+				if (!tool_calls || tool_calls.length === 0) {
+					break;
+				}
+
+				// Handle Tool Calls
+				const assistantMessage = { role: 'assistant', tool_calls: tool_calls };
+				messages.push(assistantMessage);
+
+				for (const toolCall of tool_calls) {
+					const { name, arguments: argsString } = toolCall.function;
+					const args = JSON.parse(argsString);
+
+					progress([{ kind: 'progressMessage', content: new MarkdownString(`Agent executing \`${name}\`...`) }]);
+
+					let result;
+					try {
+						switch (name) {
+							case 'read_file':
+								result = await this.readFile(args.path);
+								break;
+							case 'write_file':
+								result = await this.writeFile(args.path, args.content);
+								break;
+							case 'semantic_search':
+								result = await this.semanticSearch(args.query, args.k);
+								break;
+							default:
+								result = `Error: Unknown tool ${name}`;
+						}
+					} catch (err) {
+						result = `Error executing tool: ${err}`;
+					}
+
+					messages.push({
+						role: 'tool',
+						tool_call_id: toolCall.id,
+						name: name,
+						content: typeof result === 'string' ? result : JSON.stringify(result)
+					});
+				}
 			}
-
-			const json = JSON.parse(result!);
-			const text = json.response || 'No response from backend AI.';
-
-			progress([{
-				kind: 'markdownContent',
-				content: new MarkdownString(text)
-			}]);
 
 		} catch (e) {
 			progress([{
@@ -94,5 +135,43 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 		}
 
 		return {};
+	}
+
+	private async readFile(relativePath: string): Promise<string> {
+		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		if (!workspaceRoot) return 'Error: No workspace root found.';
+
+		const fileUri = workspaceRoot.with({ path: workspaceRoot.path + '/' + relativePath });
+		const content = await this.fileService.readFile(fileUri);
+		return content.value.toString();
+	}
+
+	private async writeFile(relativePath: string, content: string): Promise<string> {
+		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		if (!workspaceRoot) return 'Error: No workspace root found.';
+
+		const fileUri = workspaceRoot.with({ path: workspaceRoot.path + '/' + relativePath });
+		await this.fileService.writeFile(fileUri, VSBuffer.fromString(content));
+		return `Successfully updated ${relativePath}`;
+	}
+
+	private async semanticSearch(query: string, k: number = 5): Promise<any> {
+		const searchUrl = 'http://127.0.0.1:3000/search';
+		try {
+			const json = await this.aiService.request(searchUrl, {
+				query,
+				projectId: 'default_project',
+				k
+			}, CancellationToken.None);
+			return json.results || [];
+		} catch (err) {
+			// Fallback to IDE's in-memory store if backend is unavailable
+			const results = await this.semanticContextService.search(query, CancellationToken.None);
+			return results.slice(0, k).map(r => ({
+				path: r.uri.fsPath,
+				score: r.score,
+				text: r.text.substring(0, 500) + '...'
+			}));
+		}
 	}
 }

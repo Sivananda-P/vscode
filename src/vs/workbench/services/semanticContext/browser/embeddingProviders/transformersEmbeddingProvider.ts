@@ -32,6 +32,11 @@ export class TransformersEmbeddingProvider implements IEmbeddingProvider {
 
 	private readonly cache = new LRUCache<Float32Array>(LRU_CAPACITY);
 
+	private readonly batchQueue: { text: string; resolve: (emb: Float32Array) => void; reject: (err: any) => void }[] = [];
+	private batchTimer: any = null;
+	private readonly MAX_BATCH_SIZE = 32;
+	private readonly BATCH_DELAY_MS = 10;
+
 	constructor(
 		@INativeEmbeddingService private readonly nativeService: INativeEmbeddingService,
 		@ILogService private readonly logService: ILogService
@@ -43,46 +48,75 @@ export class TransformersEmbeddingProvider implements IEmbeddingProvider {
 
 	async provideEmbeddings(texts: string[], token: CancellationToken): Promise<Float32Array[]> {
 		const results: Float32Array[] = new Array(texts.length);
-		const toFetch: { text: string; index: number }[] = [];
+		const promises: Promise<void>[] = [];
 
-		// Check cache first
 		for (let i = 0; i < texts.length; i++) {
-			const cached = this.cache.get(texts[i]);
+			const text = texts[i];
+			const cached = this.cache.get(text);
 			if (cached) {
 				results[i] = cached;
 			} else {
-				toFetch.push({ text: texts[i], index: i });
+				promises.push(new Promise<void>((resolve, reject) => {
+					this.batchQueue.push({
+						text,
+						resolve: (emb) => {
+							results[i] = emb;
+							resolve();
+						},
+						reject
+					});
+				}));
 			}
 		}
 
-		if (toFetch.length === 0) {
-			return results;
+		if (this.batchQueue.length > 0 && !this.batchTimer) {
+			this.batchTimer = setTimeout(() => this.flushBatch(), this.BATCH_DELAY_MS);
+		}
+
+		if (this.batchQueue.length >= this.MAX_BATCH_SIZE) {
+			this.flushBatch();
+		}
+
+		await Promise.all(promises);
+		return results;
+	}
+
+	private async flushBatch(): Promise<void> {
+		if (this.batchTimer) {
+			clearTimeout(this.batchTimer);
+			this.batchTimer = null;
+		}
+
+		if (this.batchQueue.length === 0) return;
+
+		const batch = this.batchQueue.splice(0, this.MAX_BATCH_SIZE);
+
+		// If there's still more in the queue, schedule another flush
+		if (this.batchQueue.length > 0) {
+			this.batchTimer = setTimeout(() => this.flushBatch(), this.BATCH_DELAY_MS);
 		}
 
 		try {
-			// Call the native service in the Shared Process
-			const buffers = await this.nativeService.provideEmbeddings(toFetch.map(tf => tf.text), token);
+			const texts = batch.map(b => b.text);
+			const buffers = await this.nativeService.provideEmbeddings(texts, CancellationToken.None);
 
 			for (let i = 0; i < buffers.length; i++) {
 				const buffer = buffers[i];
-				const originalIndex = toFetch[i].index;
-
 				if (buffer.byteLength > 0) {
-					// Convert VSBuffer back to Float32Array
 					const float32 = new Float32Array(buffer.buffer.buffer, buffer.buffer.byteOffset, buffer.buffer.byteLength / 4);
-					this.cache.set(toFetch[i].text, float32);
-					results[originalIndex] = float32;
+					this.cache.set(texts[i], float32);
+					batch[i].resolve(float32);
 				} else {
-					results[originalIndex] = new Float32Array(this.embeddingDimension).fill(0);
+					const zeros = new Float32Array(this.embeddingDimension).fill(0);
+					batch[i].resolve(zeros);
 				}
 			}
 		} catch (err) {
 			this.logService.error(`TransformersEmbeddingProvider: failed to provide embeddings via native service: ${err}`);
-			for (const tf of toFetch) {
-				results[tf.index] = new Float32Array(this.embeddingDimension).fill(0);
+			const zeros = new Float32Array(this.embeddingDimension).fill(0);
+			for (const b of batch) {
+				b.resolve(zeros);
 			}
 		}
-
-		return results;
 	}
 }

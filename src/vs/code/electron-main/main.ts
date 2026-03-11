@@ -74,6 +74,8 @@ import { FileUserDataProvider } from '../../platform/userData/common/fileUserDat
 import { addUNCHostToAllowlist, getUNCHost } from '../../base/node/unc.js';
 import { ThemeMainService } from '../../platform/theme/electron-main/themeMainServiceImpl.js';
 import { LINUX_SYSTEM_POLICY_FILE_PATH } from '../../base/common/policy.js';
+import { IAIService } from '../../platform/ai/common/ai.js';
+import { AIMainService } from '../../platform/ai/electron-main/aiService.js';
 
 /**
  * The main VS Code entry point.
@@ -240,6 +242,9 @@ class CodeMain {
 
 		// Tunnel
 		services.set(ITunnelService, new SyncDescriptor(TunnelService));
+
+		// AI
+		services.set(IAIService, new SyncDescriptor(AIMainService));
 
 		// Protocol (instantiated early and not using sync descriptor for security reasons)
 		services.set(IProtocolMainService, new ProtocolMainService(environmentMainService, userDataProfilesMainService, logService));

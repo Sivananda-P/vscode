@@ -18,12 +18,11 @@ import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
-import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
+import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
 import { ExtensionIdentifier } from '../../../../../platform/extensions/common/extensions.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
-import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IMarkerService } from '../../../../../platform/markers/common/markers.js';
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import product from '../../../../../platform/product/common/product.js';
@@ -46,11 +45,11 @@ import { IChatSessionsService } from '../../common/chatSessionsService.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind } from '../../common/constants.js';
 import { CHAT_CATEGORY, CHAT_SETUP_ACTION_ID, CHAT_SETUP_SUPPORT_ANONYMOUS_ACTION_ID } from '../actions/chatActions.js';
 import { ChatViewContainerId, IChatWidgetService } from '../chat.js';
-import { chatViewsWelcomeRegistry } from '../viewsWelcome/chatViewsWelcome.js';
 import { ChatSetupAnonymous } from './chatSetup.js';
 import { ChatSetupController } from './chatSetupController.js';
 import { GrowthSessionController, registerGrowthSession } from './chatSetupGrowthSession.js';
 import { AICodeActionsHelper, AINewSymbolNamesProvider, ChatCodeActionsProvider, SetupAgent } from './chatSetupProviders.js';
+import { CustomAgent } from './customAgent.js';
 import { ChatSetup } from './chatSetupRunner.js';
 
 const defaultChat = {
@@ -68,8 +67,6 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 	constructor(
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IChatEntitlementService chatEntitlementService: ChatEntitlementService,
-		@ILogService private readonly logService: ILogService,
-		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IWorkbenchExtensionEnablementService private readonly extensionEnablementService: IWorkbenchExtensionEnablementService,
 		@IExtensionsWorkbenchService private readonly extensionsWorkbenchService: IExtensionsWorkbenchService,
 		@IExtensionService private readonly extensionService: IExtensionService,
@@ -114,26 +111,14 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 						// Panel Agents
 						const panelAgentDisposables = disposables.add(new DisposableStore());
 						for (const mode of [ChatModeKind.Ask, ChatModeKind.Edit, ChatModeKind.Agent]) {
-							const { agent, disposable } = SetupAgent.registerDefaultAgents(this.instantiationService, ChatAgentLocation.Chat, mode, context, controller);
+							const { disposable } = CustomAgent.registerCustomAgents(this.instantiationService, ChatAgentLocation.Chat, mode);
 							panelAgentDisposables.add(disposable);
-							panelAgentDisposables.add(agent.onUnresolvableError(() => {
-								const panelAgentHasGuidance = chatViewsWelcomeRegistry.get().some(descriptor => this.contextKeyService.contextMatchesRules(descriptor.when));
-								if (panelAgentHasGuidance) {
-									// An unresolvable error from our agent registrations means that
-									// Chat is unhealthy for some reason. We clear our panel
-									// registration to give Chat a chance to show a custom message
-									// to the user from the views and stop pretending as if there was
-									// a functional agent.
-									this.logService.error('[chat setup] Unresolvable error from Chat agent registration, clearing registration.');
-									panelAgentDisposables.dispose();
-								}
-							}));
 						}
 
 						// Inline Agents
-						disposables.add(SetupAgent.registerDefaultAgents(this.instantiationService, ChatAgentLocation.Terminal, ChatModeKind.Ask, context, controller).disposable);
-						disposables.add(SetupAgent.registerDefaultAgents(this.instantiationService, ChatAgentLocation.Notebook, ChatModeKind.Ask, context, controller).disposable);
-						disposables.add(SetupAgent.registerDefaultAgents(this.instantiationService, ChatAgentLocation.EditorInline, ChatModeKind.Ask, context, controller).disposable);
+						disposables.add(CustomAgent.registerCustomAgents(this.instantiationService, ChatAgentLocation.Terminal, ChatModeKind.Ask).disposable);
+						disposables.add(CustomAgent.registerCustomAgents(this.instantiationService, ChatAgentLocation.Notebook, ChatModeKind.Ask).disposable);
+						disposables.add(CustomAgent.registerCustomAgents(this.instantiationService, ChatAgentLocation.EditorInline, ChatModeKind.Ask).disposable);
 					}
 
 					// Built-In Agent + Tool (unless installed, signed-in and enabled)

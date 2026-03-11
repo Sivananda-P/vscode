@@ -13,9 +13,10 @@ Workspace Files
 SemanticIndexer (AST + fallback chunking)
       │ ICodeChunk { id, symbolName, symbolType, ... }
       ▼
-IEmbeddingProvider ─── OllamaEmbeddingProvider (local)
-      │                 RemoteAPIEmbeddingProvider (OpenAI-compat)
-      │                 MockEmbeddingProvider (dev/test)
+IEmbeddingProvider ─── TransformersEmbeddingProvider  (Xenova – DEFAULT ✓)
+      │                 OllamaEmbeddingProvider        (local Ollama)
+      │                 RemoteAPIEmbeddingProvider     (OpenAI-compat REST)
+      │                 MockEmbeddingProvider          (unit tests only – NOT for production)
       ▼
 VectorStore (SQLite – semantic_context_v2.vscdb)
       │ cosine similarity search
@@ -57,7 +58,7 @@ Status Bar: $(sync~spin) Building  |  $(check) Ready  |  $(lightbulb~spin) Updat
 | `common/semanticContext.ts` | Core interfaces: `ISemanticContextService`, `ILayeredContext`, `ICursorContext` |
 | `common/semanticIndexer.ts` | AST + fallback chunking, `getSymbolAtPosition` |
 | `common/embeddings.ts` | `IEmbeddingProvider` interface |
-| `common/mockEmbeddings.ts` | Deterministic mock (dev/test) with LRU cache |
+| `common/mockEmbeddings.ts` | **Test-only** deterministic mock (128-dim, no model needed) — **NOT registered in production** |
 | `common/dependencyGraph.ts` | BFS symbol graph, `getRelatedSymbols(id, depth)` |
 | `common/contextRetriever.ts` | 5-stage retrieval pipeline |
 | `common/contextRanker.ts` | Composite scoring, 6-12 chunk limit |
@@ -65,8 +66,10 @@ Status Bar: $(sync~spin) Building  |  $(check) Ready  |  $(lightbulb~spin) Updat
 | `common/promptAssembler.ts` | Token-budget-aware 5-section prompt builder |
 | `common/vectorStore.ts` | `IVectorStoreService` interface |
 | `common/vectorStoreIpc.ts` | `VectorStoreChannel` for IPC |
+| `common/nativeEmbeddingService.ts` | `INativeEmbeddingService` interface (IPC bridge to Shared Process) |
 | `browser/vectorStoreService.ts` | `VectorStoreServiceClient` proxy |
 | `node/vectorStoreService.ts` | SQLite implementation in Shared Process |
+| `browser/embeddingProviders/transformersEmbeddingProvider.ts` | **DEFAULT** — Xenova proxy → Shared Process via `INativeEmbeddingService` |
 | `browser/embeddingProviders/ollamaEmbeddingProvider.ts` | Ollama REST + LRU cache |
 | `browser/embeddingProviders/remoteAPIEmbeddingProvider.ts` | OpenAI-compat REST + batch + LRU |
 | `browser/indexWatcher.ts` | File change debouncer (500ms) |
@@ -80,31 +83,65 @@ Status Bar: $(sync~spin) Building  |  $(check) Ready  |  $(lightbulb~spin) Updat
 | Command | Description |
 |---|---|
 | `semantic.reindexWorkspace` | Full workspace re-index with progress notification |
-| `semantic.search` | Direct vector search, returns results array |
+| `semantic.search` | **Natural-language vector search** — prompts for a query, shows ranked results in Output panel |
 | `semantic.debugContext` | Dump full layered context for current cursor to Output panel |
 
 ---
 
-## Configuration / Switching Embedding Providers
+## Embedding Providers
 
-### Use Ollama (recommended for privacy)
+### Default — Transformer.js (Xenova) — `TransformersEmbeddingProvider`
+
+The default provider. Runs `Xenova/all-MiniLM-L6-v2` (or similar) via `@xenova/transformers` in the
+Shared Process (Node.js), keeping the browser renderer free. Communication goes over IPC via
+`INativeEmbeddingService`.
+
+- **Dimension**: 768
+- **Model**: configurable in the Shared Process / `nativeEmbeddingService`
+- **Batching**: up to 32 texts per call, 10ms debounce window
+- **LRU cache**: 512 slots
+
+### Switch to Ollama (recommended for privacy)
 
 1. Install: `ollama pull nomic-embed-text && ollama serve`
 2. In `semanticContext.contribution.ts`, change:
 
 ```typescript
 // Replace:
-registerSingleton(IEmbeddingProvider, MockEmbeddingProvider, ...);
+registerSingleton(IEmbeddingProvider, TransformersEmbeddingProvider, ...);
 // With:
 registerSingleton(IEmbeddingProvider, OllamaEmbeddingProvider, ...);
 ```
 
-### Use OpenAI
+| Model | Dim | Notes |
+|---|---|---|
+| `nomic-embed-text` | 768 | Best quality, good speed |
+| `mxbai-embed-large` | 1024 | Higher quality, slower |
+| `all-minilm` | 384 | Fastest, lower quality |
+
+### Switch to OpenAI / Remote API
 
 ```typescript
 registerSingleton(IEmbeddingProvider, RemoteAPIEmbeddingProvider, ...);
 // Then call configure() with your endpoint + API key
 ```
+
+Works with any OpenAI-compatible endpoint (Azure OpenAI, LM Studio, etc.).
+
+### Other Good Embedding Options
+
+| Provider | Model | Dim | Why Choose It |
+|---|---|---|---|
+| **Xenova (default)** ✓ | `all-MiniLM-L6-v2` | 384–768 | Runs locally in-process, zero infra |
+| **Ollama** | `nomic-embed-text` | 768 | Best local quality, easy to swap |
+| **Ollama** | `mxbai-embed-large` | 1024 | Highest local quality |
+| **OpenAI** | `text-embedding-3-small` | 1536 | Cloud, best semantic quality |
+| **OpenAI** | `text-embedding-3-large` | 3072 | Maximum accuracy, expensive |
+| **Cohere** | `embed-english-v3.0` | 1024 | Great multilingual support |
+| **Jina AI** | `jina-embeddings-v2-base-code` | 768 | Code-optimized, open weights |
+
+> **Tip**: For code-heavy workspaces, `jina-embeddings-v2-base-code` or `nomic-embed-text` generally
+> outperform general-purpose models like `all-MiniLM-L6-v2`.
 
 ---
 

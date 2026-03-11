@@ -10,13 +10,21 @@ import { Event } from '../../../../base/common/event.js';
 
 export const ISemanticContextService = createDecorator<ISemanticContextService>('semanticContextService');
 
-export type SemanticIndexStatus = 'idle' | 'building' | 'ready' | 'updating' | 'error';
+export type SemanticIndexStatus = 'unindexed' | 'idle' | 'building' | 'ready' | 'updating' | 'error';
+
+export interface IIndexProgress {
+	total: number;
+	processed: number;
+}
 
 export interface ISemanticContextService {
 	readonly _serviceBrand: undefined;
 
 	/** Fires whenever the indexing status changes. */
 	readonly onDidChangeStatus: Event<SemanticIndexStatus>;
+
+	/** Fires during bulk indexing with progress updates. */
+	readonly onDidIndexProgress: Event<IIndexProgress>;
 
 	/** Current indexing status. */
 	readonly status: SemanticIndexStatus;

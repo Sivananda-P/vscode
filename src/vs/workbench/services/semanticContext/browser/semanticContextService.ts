@@ -6,7 +6,7 @@
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
-import { ISemanticContextService, ISemanticSearchResult, ILayeredContext, IPosition, SemanticIndexStatus } from '../common/semanticContext.js';
+import { ISemanticContextService, ISemanticSearchResult, ILayeredContext, IPosition, SemanticIndexStatus, IIndexProgress } from '../common/semanticContext.js';
 import { IEmbeddingProvider } from '../common/embeddings.js';
 import { IVectorStoreService } from '../common/vectorStore.js';
 import { SemanticIndexer } from '../common/semanticIndexer.js';
@@ -23,6 +23,8 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { IOutlineModelService } from '../../../../editor/contrib/documentSymbols/browser/outlineModel.js';
 import { ITextModelService } from '../../../../editor/common/services/resolverService.js';
 import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
+import { ISearchService, QueryType } from '../../search/common/search.js';
+import { IEditorService } from '../../editor/common/editorService.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { URI } from '../../../../base/common/uri.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
@@ -34,7 +36,7 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 	private readonly _onDidChangeStatus = this._register(new Emitter<SemanticIndexStatus>());
 	readonly onDidChangeStatus: Event<SemanticIndexStatus> = this._onDidChangeStatus.event;
 
-	private _status: SemanticIndexStatus = 'idle';
+	private _status: SemanticIndexStatus = 'unindexed';
 	get status(): SemanticIndexStatus { return this._status; }
 	private setStatus(s: SemanticIndexStatus): void {
 		if (this._status !== s) {
@@ -42,6 +44,9 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 			this._onDidChangeStatus.fire(s);
 		}
 	}
+
+	private readonly _onDidIndexProgress = this._register(new Emitter<IIndexProgress>());
+	readonly onDidIndexProgress: Event<IIndexProgress> = this._onDidIndexProgress.event;
 
 	// ── Core components ───────────────────────────────────────────────────────
 	private readonly indexer: SemanticIndexer;
@@ -65,7 +70,9 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		@ITextModelService textModelService: ITextModelService,
 		@ILanguageFeaturesService languageFeaturesService: ILanguageFeaturesService,
 		@IInstantiationService instantiationService: IInstantiationService,
-		@IVectorStoreService private readonly vectorStore: IVectorStoreService
+		@IVectorStoreService private readonly vectorStore: IVectorStoreService,
+		@ISearchService private readonly searchService: ISearchService,
+		@IEditorService private readonly editorService: IEditorService
 	) {
 
 		super();
@@ -86,6 +93,14 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 				(uri: URI) => this.reindexFile(uri)
 			)
 		);
+
+		// Lazy indexing: re-index active editor on change
+		this._register(this.editorService.onDidActiveEditorChange(() => {
+			const activeEditor = this.editorService.activeEditor;
+			if (activeEditor?.resource) {
+				this.reindexFile(activeEditor.resource).catch(() => { });
+			}
+		}));
 	}
 
 	// ── VectorStore lazy init ─────────────────────────────────────────────────
@@ -124,8 +139,33 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 
 		try {
 			const store = await this.ensureVectorStore();
-			for (const folder of folders) {
-				await this.indexFolder(folder.uri, store, token, true);
+			const mtimesData = await store.getFileMtimes();
+			const mtimesMap = new Map<string, number>(mtimesData);
+
+			// Map folders to query format
+			const folderQueries = folders.map(f => ({ folder: f.uri }));
+
+			// Use searchService to find all supported files efficiently (respects .gitignore and excludes)
+			const searchComplete = await this.searchService.fileSearch({
+				type: QueryType.File,
+				folderQueries,
+				includePattern: { '**/*.{ts,js,py,java,go,cpp,c,cs,rs,tsx,jsx}': true },
+				maxResults: 100000
+			}, token);
+
+			this.logService.info(`SemanticContextService: discovered ${searchComplete.results.length} candidate files.`);
+
+			// Process files in parallel with high concurrency for metadata checks
+			const total = searchComplete.results.length;
+			let processed = 0;
+			const concurrencyLimit = 20;
+
+			for (let i = 0; i < total; i += concurrencyLimit) {
+				if (token.isCancellationRequested) break;
+				const batch = searchComplete.results.slice(i, i + concurrencyLimit);
+				await Promise.all(batch.map(file => this.reindexFile(file.resource, true, mtimesMap)));
+				processed += batch.length;
+				this._onDidIndexProgress.fire({ total, processed });
 			}
 
 			// Rebuild index once after all files are in the DB
@@ -145,30 +185,26 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		}
 	}
 
-	private async indexFolder(uri: URI, store: IVectorStoreService, token: CancellationToken, isBulk = false): Promise<void> {
-		const stat = await this.fileService.resolve(uri);
-		if (!stat.children) return;
-		// Parallelize with a small limit to avoid hammering the disk/CPU too hard on i3
-		const concurrencyLimit = 5;
-		for (let i = 0; i < stat.children.length; i += concurrencyLimit) {
-			if (token.isCancellationRequested) return;
-			const batch = stat.children.slice(i, i + concurrencyLimit);
-			await Promise.all(batch.map(async child => {
-				if (child.isDirectory) {
-					if (!this.isIgnoredDir(child.name)) {
-						await this.indexFolder(child.resource, store, token, isBulk);
-					}
-				} else {
-					await this.reindexFile(child.resource, isBulk);
-				}
-			}));
-		}
-	}
+	// ── Re-indexing ───────────────────────────────────────────────────────────
 
 	/** Re-index a single file (called by IndexWatcher and on initial index). */
-	async reindexFile(uri: URI, skipIndexUpdate = false): Promise<void> {
+	async reindexFile(uri: URI, skipIndexUpdate = false, mtimesMap?: Map<string, number>): Promise<void> {
 		if (!this.isSupportedFile(uri)) return;
 		const store = await this.ensureVectorStore();
+
+		// Fast-path: check mtime before doing ANY work
+		try {
+			const stat = await this.fileService.resolve(uri, { resolveMetadata: true });
+			const indexedAt = mtimesMap ? mtimesMap.get(uri.toString()) : (await store.getFileMtimes()).find(m => m[0] === uri.toString())?.[1];
+
+			if (indexedAt && stat.mtime <= indexedAt) {
+				this.logService.trace(`SemanticContextService: skipping ${uri.fsPath} (unchanged)`);
+				return;
+			}
+		} catch (err) {
+			// If file doesn't exist or can't be resolved, just skip it
+			return;
+		}
 
 		const wasPreviouslyReady = this._status === 'ready';
 		if (wasPreviouslyReady) this.setStatus('updating');
@@ -176,7 +212,12 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		const t0 = Date.now();
 		try {
 			const chunks = await this.indexer.indexFile(uri, CancellationToken.None);
-			if (chunks.length === 0) return;
+			if (chunks.length === 0) {
+				// Even if no chunks, we should record the mtime to avoid re-scanning
+				await store.addChunks([], [], skipIndexUpdate);
+				if (wasPreviouslyReady) this.setStatus('ready');
+				return;
+			}
 
 			const embeddings = await this.embeddingProvider.provideEmbeddings(
 				chunks.map(c => c.text), CancellationToken.None
@@ -194,7 +235,8 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 			this.filesIndexed++;
 			this.chunksCreated += chunks.length;
 			this.logService.trace(
-				`SemanticContextService: reindexFile ${uri.fsPath} → ${chunks.length} chunks in ${Date.now() - t0}ms`
+				`SemanticContextService: reindexFile ${uri.fsPath} → ${chunks.length} chunks ` +
+				`in ${Date.now() - t0}ms`
 			);
 
 			if (wasPreviouslyReady) this.setStatus('ready');
@@ -299,11 +341,7 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 
 	private isSupportedFile(uri: URI): boolean {
 		const ext = uri.path.split('.').pop()?.toLowerCase();
-		return ['ts', 'js', 'py', 'java', 'go', 'cpp', 'c', 'cs', 'rs', 'tsx', 'jsx'].includes(ext ?? '');
-	}
-
-	private isIgnoredDir(name: string): boolean {
-		return ['node_modules', '.git', 'out', 'dist', '.build', 'coverage'].includes(name);
+		return !!ext && ['ts', 'js', 'py', 'java', 'go', 'cpp', 'c', 'cs', 'rs', 'tsx', 'jsx'].includes(ext);
 	}
 
 	override dispose(): void {
