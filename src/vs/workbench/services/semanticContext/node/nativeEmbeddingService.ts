@@ -25,8 +25,12 @@ export class NativeEmbeddingService implements INativeEmbeddingService {
 	) { }
 
 	private async _ensurePipeline(): Promise<void> {
-		if (this._pipeline) return;
-		if (this._initPromise) return this._initPromise;
+		if (this._pipeline) {
+			return;
+		}
+		if (this._initPromise) {
+			return this._initPromise;
+		}
 
 		this._initPromise = (async () => {
 			this.logService.info(`NativeEmbeddingService: loading model ${this.modelName}...`);

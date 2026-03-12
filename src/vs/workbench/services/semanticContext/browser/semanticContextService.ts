@@ -8,7 +8,7 @@ import { Emitter, Event } from '../../../../base/common/event.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { ISemanticContextService, ISemanticSearchResult, ILayeredContext, IPosition, SemanticIndexStatus, IIndexProgress } from '../common/semanticContext.js';
 import { IEmbeddingProvider } from '../common/embeddings.js';
-import { IVectorStoreService } from '../common/vectorStore.js';
+import { IVectorStoreService, ISearchResult } from '../common/vectorStore.js';
 import { SemanticIndexer } from '../common/semanticIndexer.js';
 
 import { DependencyGraph } from '../common/dependencyGraph.js';
@@ -28,6 +28,8 @@ import { IEditorService } from '../../editor/common/editorService.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { URI } from '../../../../base/common/uri.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { DEFAULT_CODE_FILE_PATTERNS, buildExcludePatterns } from '../common/searchConfig.js';
 
 export class SemanticContextService extends Disposable implements ISemanticContextService {
 	declare readonly _serviceBrand: undefined;
@@ -67,12 +69,13 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@ILogService private readonly logService: ILogService,
 		@IOutlineModelService outlineModelService: IOutlineModelService,
-		@ITextModelService textModelService: ITextModelService,
+		@ITextModelService private readonly textModelService: ITextModelService,
 		@ILanguageFeaturesService languageFeaturesService: ILanguageFeaturesService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IVectorStoreService private readonly vectorStore: IVectorStoreService,
 		@ISearchService private readonly searchService: ISearchService,
-		@IEditorService private readonly editorService: IEditorService
+		@IEditorService private readonly editorService: IEditorService,
+		@IConfigurationService private readonly configurationService: IConfigurationService
 	) {
 
 		super();
@@ -110,7 +113,6 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 			await this.vectorStore.init();
 			// Wire retriever now that store is available
 			this._retriever = new ContextRetriever(
-				this.embeddingProvider,
 				this.vectorStore,
 				this.dependencyGraph,
 				this.logService
@@ -146,10 +148,12 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 			const folderQueries = folders.map(f => ({ folder: f.uri }));
 
 			// Use searchService to find all supported files efficiently (respects .gitignore and excludes)
+			const mergeExcludes = buildExcludePatterns(this.configurationService);
 			const searchComplete = await this.searchService.fileSearch({
 				type: QueryType.File,
 				folderQueries,
-				includePattern: { '**/*.{ts,js,py,java,go,cpp,c,cs,rs,tsx,jsx}': true },
+				includePattern: DEFAULT_CODE_FILE_PATTERNS,
+				excludePattern: mergeExcludes,
 				maxResults: 100000
 			}, token);
 
@@ -161,7 +165,9 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 			const concurrencyLimit = 20;
 
 			for (let i = 0; i < total; i += concurrencyLimit) {
-				if (token.isCancellationRequested) break;
+				if (token.isCancellationRequested) {
+					break;
+				}
 				const batch = searchComplete.results.slice(i, i + concurrencyLimit);
 				await Promise.all(batch.map(file => this.reindexFile(file.resource, true, mtimesMap)));
 				processed += batch.length;
@@ -189,7 +195,9 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 
 	/** Re-index a single file (called by IndexWatcher and on initial index). */
 	async reindexFile(uri: URI, skipIndexUpdate = false, mtimesMap?: Map<string, number>): Promise<void> {
-		if (!this.isSupportedFile(uri)) return;
+		if (!this.isSupportedFile(uri)) {
+			return;
+		}
 		const store = await this.ensureVectorStore();
 
 		// Fast-path: check mtime before doing ANY work
@@ -207,52 +215,75 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		}
 
 		const wasPreviouslyReady = this._status === 'ready';
-		if (wasPreviouslyReady) this.setStatus('updating');
+		if (wasPreviouslyReady) {
+			this.setStatus('updating');
+		}
 
 		const t0 = Date.now();
 		try {
-			const chunks = await this.indexer.indexFile(uri, CancellationToken.None);
-			if (chunks.length === 0) {
-				// Even if no chunks, we should record the mtime to avoid re-scanning
-				await store.addChunks([], [], skipIndexUpdate);
-				if (wasPreviouslyReady) this.setStatus('ready');
-				return;
+			let chunksCount = 0;
+			const ext = uri.fsPath.split('.').pop()?.toLowerCase();
+			if (ext === 'ts' || ext === 'js' || ext === 'tsx' || ext === 'jsx') {
+				// Professional Phase 8: Offload AST parsing and chunking to the backend
+				const modelRef = await this.textModelService.createModelReference(uri);
+				try {
+					const text = modelRef.object.textEditorModel.getValue();
+					// store.indexFile is expected to handle chunking, embedding, and storing
+					// and return the number of chunks created.
+					chunksCount = await store.indexFile(uri, text, ext, skipIndexUpdate);
+				} finally {
+					modelRef.dispose();
+				}
+			} else {
+				// Fallback path: Use local symbols for other languages
+				const chunks = await this.indexer.indexFile(uri, CancellationToken.None);
+				if (chunks.length === 0) {
+					// Even if no chunks, we should record the mtime to avoid re-scanning
+					await store.addChunks([], [], skipIndexUpdate);
+					if (wasPreviouslyReady) {
+						this.setStatus('ready');
+					}
+					return;
+				}
+
+				const embeddings = await this.embeddingProvider.provideEmbeddings(
+					chunks, CancellationToken.None
+				);
+				const binaryEmbeddings = embeddings.map(e => VSBuffer.wrap(new Uint8Array(e.buffer, e.byteOffset, e.byteLength)));
+
+				await store.deleteChunks(uri, skipIndexUpdate);
+				await store.addChunks(chunks, binaryEmbeddings, skipIndexUpdate);
+
+				// Update dependency graph
+				this.dependencyGraph.removeFile(uri);
+				this.dependencyGraph.addChunks(chunks);
+				await this.dependencyGraph.resolveImportsForFile(uri, CancellationToken.None);
+				chunksCount = chunks.length;
 			}
 
-			const embeddings = await this.embeddingProvider.provideEmbeddings(
-				chunks.map(c => c.text), CancellationToken.None
-			);
-			const binaryEmbeddings = embeddings.map(e => VSBuffer.wrap(new Uint8Array(e.buffer, e.byteOffset, e.byteLength)));
-
-			await store.deleteChunks(uri, skipIndexUpdate);
-			await store.addChunks(chunks, binaryEmbeddings, skipIndexUpdate);
-
-			// Update dependency graph
-			this.dependencyGraph.removeFile(uri);
-			this.dependencyGraph.addChunks(chunks);
-			await this.dependencyGraph.resolveImportsForFile(uri, CancellationToken.None);
-
 			this.filesIndexed++;
-			this.chunksCreated += chunks.length;
+			this.chunksCreated += chunksCount;
 			this.logService.trace(
-				`SemanticContextService: reindexFile ${uri.fsPath} → ${chunks.length} chunks ` +
+				`SemanticContextService: reindexFile ${uri.fsPath} → ${chunksCount} chunks ` +
 				`in ${Date.now() - t0}ms`
 			);
 
-			if (wasPreviouslyReady) this.setStatus('ready');
+			if (wasPreviouslyReady) {
+				this.setStatus('ready');
+			}
 		} catch (err) {
 			this.logService.error(`SemanticContextService: reindexFile failed for ${uri.toString()}: ${err}`);
-			if (wasPreviouslyReady) this.setStatus('ready');
+			if (wasPreviouslyReady) {
+				this.setStatus('ready');
+			}
 		}
 	}
 
 	// ── Search ────────────────────────────────────────────────────────────────
 
-	async search(query: string, token: CancellationToken): Promise<ISemanticSearchResult[]> {
+	async search(query: string, token: CancellationToken): Promise<ISearchResult[]> {
 		const store = await this.ensureVectorStore();
-		const [queryEmb] = await this.embeddingProvider.provideEmbeddings([query], token);
-		const queryBuffer = VSBuffer.wrap(new Uint8Array(queryEmb.buffer, queryEmb.byteOffset, queryEmb.byteLength));
-		return store.search(queryBuffer, 10);
+		return store.searchByText(query, 10);
 	}
 
 	// ── Layered Context ───────────────────────────────────────────────────────

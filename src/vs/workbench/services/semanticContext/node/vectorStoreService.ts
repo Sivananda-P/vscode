@@ -13,6 +13,10 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { VPTree, cosineDistance } from '../common/vectorIndex.js';
 
+/**
+ * Node-side implementation of VectorStoreService using SQLite.
+ * Used primarily in the Shared Process.
+ */
 export class VectorStoreService extends Disposable implements IVectorStoreService {
 	declare readonly _serviceBrand: undefined;
 
@@ -29,7 +33,9 @@ export class VectorStoreService extends Disposable implements IVectorStoreServic
 	}
 
 	async init(): Promise<void> {
-		if (this.db) return;
+		if (this.db) {
+			return;
+		}
 
 		const sqlite3 = await import('@vscode/sqlite3');
 		return new Promise((resolve, reject) => {
@@ -57,8 +63,9 @@ export class VectorStoreService extends Disposable implements IVectorStoreServic
 					`);
 					this.db.run(`CREATE INDEX IF NOT EXISTS idx_chunks_uri ON Chunks (uri)`);
 					this.db.run(`CREATE INDEX IF NOT EXISTS idx_chunks_symbol ON Chunks (symbolName)`, async (err: Error | null) => {
-						if (err) reject(err);
-						else {
+						if (err) {
+							reject(err);
+						} else {
 							this.logService.info(`VectorStoreService: Database initialized at ${this.dbPath}`);
 							try {
 								await this.rebuildIndex();
@@ -74,11 +81,16 @@ export class VectorStoreService extends Disposable implements IVectorStoreServic
 	}
 
 	async rebuildIndex(): Promise<void> {
+		if (!this.db) {
+			await this.init();
+		}
 		this.logService.info('VectorStoreService: building in-memory VP-Tree index...');
 		this.index = new VPTree(cosineDistance);
 		return new Promise((resolve, reject) => {
 			this.db.all('SELECT * FROM Chunks', (err: Error | null, rows: any[]) => {
-				if (err) return reject(err);
+				if (err) {
+					return reject(err);
+				}
 				const items = rows.map(row => ({
 					vector: new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4),
 					metadata: {
@@ -102,7 +114,9 @@ export class VectorStoreService extends Disposable implements IVectorStoreServic
 	}
 
 	async addChunks(chunks: ICodeChunk[], embeddings: VSBuffer[], skipIndexUpdate = false): Promise<void> {
-		if (!this.db) await this.init();
+		if (!this.db) {
+			await this.init();
+		}
 		if (chunks.length !== embeddings.length) {
 			throw new Error('Chunks and embeddings length mismatch');
 		}
@@ -136,8 +150,9 @@ export class VectorStoreService extends Disposable implements IVectorStoreServic
 				}
 				stmt.finalize();
 				this.db.run('COMMIT', async (err: Error | null) => {
-					if (err) reject(err);
-					else {
+					if (err) {
+						reject(err);
+					} else {
 						if (!skipIndexUpdate) {
 							await this.rebuildIndex();
 						}
@@ -149,11 +164,14 @@ export class VectorStoreService extends Disposable implements IVectorStoreServic
 	}
 
 	async deleteChunks(uri: URI, skipIndexUpdate = false): Promise<void> {
-		if (!this.db) await this.init();
+		if (!this.db) {
+			await this.init();
+		}
 		return new Promise((resolve, reject) => {
 			this.db.run(`DELETE FROM Chunks WHERE uri = ?`, [uri.toString()], async (err: Error | null) => {
-				if (err) reject(err);
-				else {
+				if (err) {
+					reject(err);
+				} else {
 					if (!skipIndexUpdate) {
 						await this.rebuildIndex();
 					}
@@ -164,8 +182,12 @@ export class VectorStoreService extends Disposable implements IVectorStoreServic
 	}
 
 	async search(queryEmbedding: VSBuffer, limit = 10): Promise<ISearchResult[]> {
-		if (!this.db) await this.init();
-		if (!this.index) await this.rebuildIndex();
+		if (!this.db) {
+			await this.init();
+		}
+		if (!this.index) {
+			await this.rebuildIndex();
+		}
 
 		const queryArr = new Float32Array(queryEmbedding.buffer.buffer, queryEmbedding.buffer.byteOffset, queryEmbedding.buffer.byteLength / 4);
 		const matches = this.index!.search(queryArr, limit);
@@ -176,13 +198,33 @@ export class VectorStoreService extends Disposable implements IVectorStoreServic
 		}));
 	}
 
+	async searchByText(query: string, limit = 10): Promise<ISearchResult[]> {
+		// Professional Phase 8: Text-based semantic search is now handled by the backend.
+		// This node implementation is a legacy fallback.
+		this.logService.warn('VectorStoreService (Node): searchByText called. This implementation is a stub.');
+		return [];
+	}
+
+	async indexFile(uri: URI, text: string, languageId: string, skipIndexUpdate?: boolean): Promise<number> {
+		// Professional Phase 8: Server-side indexing is now handled by the backend.
+		// This node implementation is a legacy fallback.
+		this.logService.warn('VectorStoreService (Node): indexFile called. This implementation is a stub.');
+		return 0;
+	}
+
 	async getFileMtimes(): Promise<[string, number][]> {
-		if (!this.db) await this.init();
+		if (!this.db) {
+			await this.init();
+		}
 		return new Promise((resolve, reject) => {
 			this.db.all(`SELECT DISTINCT uri, MAX(indexedAt) as mtime FROM Chunks GROUP BY uri`, (err: Error | null, rows: any[]) => {
-				if (err) return reject(err);
+				if (err) {
+					return reject(err);
+				}
 				const result: [string, number][] = [];
-				for (const row of rows) result.push([row.uri, row.mtime]);
+				for (const row of rows) {
+					result.push([row.uri, row.mtime]);
+				}
 				resolve(result);
 			});
 		});
@@ -192,18 +234,22 @@ export class VectorStoreService extends Disposable implements IVectorStoreServic
 		if (this.db) {
 			return new Promise((resolve, reject) => {
 				this.db.close((err: Error | null) => {
-					if (err) reject(err);
-					else resolve();
+					if (err) {
+						reject(err);
+					} else {
+						resolve();
+					}
 				});
 			});
 		}
 	}
 
-
 	override dispose(): void {
 		if (this.db) {
 			this.db.close((err: Error | null) => {
-				if (err) this.logService.error(`VectorStoreService: Failed to close database: ${err}`);
+				if (err) {
+					this.logService.error(`VectorStoreService: Failed to close database: ${err}`);
+				}
 			});
 		}
 		super.dispose();

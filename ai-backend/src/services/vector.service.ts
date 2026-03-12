@@ -13,16 +13,33 @@ export class VectorService {
 		return this.db;
 	}
 
+	/**
+	 * Indexes chunks into LanceDB.
+	 * Expected metadata shape for AST chunks:
+	 * {
+	 *   id: string,
+	 *   uri: string,
+	 *   filePath: string,
+	 *   range: { startLineNumber: number, startColumn: number, endLineNumber: number, endColumn: number },
+	 *   symbolName?: string,
+	 *   symbolType?: string
+	 * }
+	 */
 	static async indexChunks(projectId: string, chunks: { text: string; vector: number[]; metadata: any }[]) {
 		const db = await this.connect();
 		const tableName = `project_${projectId.replace(/[^a-zA-Z0-9]/g, "_")}`;
 
-		let table;
 		try {
-			table = await db.openTable(tableName);
+			const table = await db.openTable(tableName);
 			await table.add(chunks);
-		} catch {
-			table = await db.createTable(tableName, chunks);
+		} catch (err) {
+			console.log(`[Vector] Table ${tableName} not found or error adding, creating new:`, err);
+			try {
+				await db.createTable(tableName, chunks);
+			} catch (createErr) {
+				console.error(`[Vector] FAILED to create/add to table ${tableName}:`, createErr);
+				throw createErr;
+			}
 		}
 	}
 
@@ -36,7 +53,8 @@ export class VectorService {
 				.limit(k)
 				.toArray();
 			return results;
-		} catch {
+		} catch (err) {
+			console.error(`[Vector] Search failed on table ${tableName}:`, err);
 			return [];
 		}
 	}

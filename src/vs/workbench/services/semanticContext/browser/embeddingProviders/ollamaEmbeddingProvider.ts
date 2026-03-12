@@ -6,6 +6,7 @@
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { IEmbeddingProvider } from '../../common/embeddings.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
+import { ICodeChunk } from '../../common/semanticIndexer.js';
 
 const LRU_CAPACITY = 512;
 
@@ -58,9 +59,10 @@ export class OllamaEmbeddingProvider implements IEmbeddingProvider {
 		}
 	}
 
-	async provideEmbeddings(texts: string[], token: CancellationToken): Promise<Float32Array[]> {
+	async provideEmbeddings(inputs: (ICodeChunk | { text: string })[], token: CancellationToken): Promise<Float32Array[]> {
 		const results: Float32Array[] = [];
-		for (const text of texts) {
+		for (const input of inputs) {
+			const text = input.text;
 			if (token.isCancellationRequested) break;
 
 			const cached = this.cache.get(text);

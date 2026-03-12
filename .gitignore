@@ -36,3 +36,6 @@ ai-backend/.env
 ai-backend/node_modules/
 ai-backend/dist/
 ai-backend/*.cjs
+ai-backend/data/
+ai-backend/test_*.ts
+ai-backend/list_models*.ts

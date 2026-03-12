@@ -5,12 +5,10 @@
 
 import { URI } from '../../../../base/common/uri.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
-import { IEmbeddingProvider } from './embeddings.js';
 import { IVectorStoreService } from './vectorStore.js';
 import { DependencyGraph } from './dependencyGraph.js';
 import { ICursorContext, ILayeredContext, ISemanticSearchResult } from './semanticContext.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
-import { VSBuffer } from '../../../../base/common/buffer.js';
 
 /**
  * ContextRetriever orchestrates the multi-stage retrieval pipeline:
@@ -23,7 +21,6 @@ import { VSBuffer } from '../../../../base/common/buffer.js';
  */
 export class ContextRetriever {
 	constructor(
-		private readonly embeddingProvider: IEmbeddingProvider,
 		private readonly vectorStore: IVectorStoreService,
 		private readonly dependencyGraph: DependencyGraph,
 		private readonly logService: ILogService
@@ -36,15 +33,12 @@ export class ContextRetriever {
 		topK = 10,
 		onProgress?: (partial: Pick<ILayeredContext, 'semanticMatches' | 'dependencyContext' | 'relatedFiles'>) => void
 	): Promise<Pick<ILayeredContext, 'semanticMatches' | 'dependencyContext' | 'relatedFiles'>> {
-		// Step 1: Embed the query
-		const [queryEmbedding] = await this.embeddingProvider.provideEmbeddings([query], token);
+		// Professional Phase 8: Use backend-native text search
+		const rawResults = await this.vectorStore.searchByText(query, topK);
 		if (token.isCancellationRequested) {
 			return { semanticMatches: [], dependencyContext: [], relatedFiles: [] };
 		}
 
-		// Step 2: Top-K vector search
-		const queryBuffer = VSBuffer.wrap(new Uint8Array(queryEmbedding.buffer, queryEmbedding.byteOffset, queryEmbedding.byteLength));
-		const rawResults = await this.vectorStore.search(queryBuffer, topK);
 		const semanticMatches: ISemanticSearchResult[] = rawResults.map(r => ({
 			uri: r.uri,
 			range: r.range,

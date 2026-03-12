@@ -17,6 +17,8 @@ const SURROUNDING_LINES = 20;
  * - Current function/method/class symbol
  * - ±20 surrounding lines
  * - All import statements in the file
+ *
+ * Professional Phase 8: This service is now 100% renderer-safe (no typescript module import).
  */
 export class CursorContextExtractor {
 	constructor(
@@ -46,14 +48,16 @@ export class CursorContextExtractor {
 			// ── Import statements ────────────────────────────────────────────
 			const importStatements = this.extractImports(model, lineCount);
 
-			// ── AST symbol at cursor ─────────────────────────────────────────
+			// ── Position-based symbol extraction ──────────────────────────────────
 			let currentSymbol: ISymbolInfo | undefined;
 			let enclosingSymbol: ISymbolInfo | undefined;
 
 			try {
+				// Professional Phase 8: Use Outline Symbols for all languages (safe for browser)
 				const outline = await this.outlineModelService.getOrCreate(model, token);
 				const allSymbols = outline.getTopLevelSymbols();
 				const hierarchy = this.findSymbolHierarchy(allSymbols, position.lineNumber);
+
 				if (hierarchy.length >= 1) {
 					currentSymbol = this.toSymbolInfo(hierarchy[hierarchy.length - 1], model);
 				}
@@ -102,8 +106,10 @@ export class CursorContextExtractor {
 
 	private extractImports(model: any, lineCount: number): string[] {
 		const imports: string[] = [];
-		// Scan first 60 lines for import/require/from statements
-		const scanTo = Math.min(60, lineCount);
+
+		// Professional Phase 8: Use Regex scanner for imports in the renderer.
+		// Fast, efficient, and doesn't require a heavy AST parser for TS.
+		const scanTo = Math.min(100, lineCount); // Scan more lines for imports
 		for (let i = 1; i <= scanTo; i++) {
 			const line = model.getLineContent(i) as string;
 			if (/^\s*(import|export\s+.*\s+from|const\s+\w+\s*=\s*require)\b/.test(line)) {

@@ -1,10 +1,6 @@
-/*---------------------------------------------------------------------------------------------
- *  Copyright (c) Microsoft Corporation. All rights reserved.
- *  Licensed under the MIT License. See License.txt in the project root for license information.
- *--------------------------------------------------------------------------------------------*/
-
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { ICodeChunk } from './semanticIndexer.js';
 
 export const IEmbeddingProvider = createDecorator<IEmbeddingProvider>('embeddingProvider');
 
@@ -17,6 +13,6 @@ export interface IEmbeddingProvider {
 	/** Check if the provider is reachable and configured. */
 	isAvailable(): Promise<boolean>;
 
-	/** Compute embeddings for a batch of texts. */
-	provideEmbeddings(texts: string[], token: CancellationToken): Promise<Float32Array[]>;
+	/** Compute embeddings for a batch of chunks or raw text. */
+	provideEmbeddings(chunks: (ICodeChunk | { text: string })[], token: CancellationToken): Promise<Float32Array[]>;
 }

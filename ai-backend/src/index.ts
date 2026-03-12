@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { AiService } from "./services/ai.service";
 import { VectorService } from "./services/vector.service";
+import { AstService } from "./services/ast.service";
 
 dotenv.config();
 
@@ -80,6 +81,38 @@ app.post("/embeddings/index", async (req: express.Request, res: express.Response
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
 		console.error("Indexing Error:", message);
+		res.status(500).json({ error: message });
+	}
+});
+
+// --- Server-Side AST Indexing Endpoint ---
+app.post("/embeddings/index-file", async (req: express.Request, res: express.Response) => {
+	const { projectId, uri, text, languageId } = req.body;
+
+	try {
+		console.log(`[AI] Server-side indexing for ${uri} (${languageId})...`);
+
+		// 1. Perform Professional AST Parsing
+		const chunks = AstService.parseFile(uri, text, languageId);
+		console.log(`[AI] Extracted ${chunks.length} professional chunks.`);
+
+		// 2. Embed
+		const texts = chunks.map(c => c.text);
+		const vectors = await AiService.generateEmbeddings(texts) as number[][];
+
+		const formattedChunks = chunks.map((c, i) => ({
+			text: c.text,
+			metadata: c.metadata,
+			vector: vectors[i]
+		}));
+
+		// 3. Store
+		await VectorService.indexChunks(projectId, formattedChunks);
+
+		res.json({ success: true, count: chunks.length });
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.error("Server-Side Indexing Error:", message);
 		res.status(500).json({ error: message });
 	}
 });

@@ -33,12 +33,18 @@ function makeChunkId(uri: URI, startLine: number, endLine: number): string {
 
 // ─── SemanticIndexer ────────────────────────────────────────────────────────
 
+/**
+ * Professional SemanticIndexer that uses VS Code's Outline symbols.
+ * Safe for use in the renderer (browser) process.
+ */
 export class SemanticIndexer {
+
 	constructor(
 		@IOutlineModelService private readonly outlineModelService: IOutlineModelService,
 		@ITextModelService private readonly textModelService: ITextModelService,
 		@ILogService private readonly logService: ILogService
-	) { }
+	) {
+	}
 
 	async indexFile(uri: URI, token: CancellationToken): Promise<ICodeChunk[]> {
 		this.logService.trace(`SemanticIndexer: indexing ${uri.toString()}`);
@@ -46,6 +52,8 @@ export class SemanticIndexer {
 		const modelRef = await this.textModelService.createModelReference(uri);
 		try {
 			const model = modelRef.object.textEditorModel;
+
+			// Fallback to Outline Symbols (works for all languages VS Code understands)
 			const outline = await this.outlineModelService.getOrCreate(model, token);
 			const symbols = outline.getTopLevelSymbols();
 
@@ -120,12 +128,13 @@ export class SemanticIndexer {
 				range,
 				text: model.getValueInRange(range)
 			});
-			if (endLine === lineCount) break;
+			if (endLine === lineCount) {
+				break;
+			}
 		}
 		return chunks;
 	}
 
-	/** Extract structured symbol info from a position (used by CursorContext). */
 	async getSymbolAtPosition(uri: URI, lineNumber: number, column: number, token: CancellationToken): Promise<ISymbolInfo | undefined> {
 		const modelRef = await this.textModelService.createModelReference(uri);
 		try {
@@ -142,10 +151,11 @@ export class SemanticIndexer {
 		for (const sym of symbols) {
 			const r = sym.range as IRange;
 			if (r.startLineNumber <= lineNumber && lineNumber <= r.endLineNumber) {
-				// Prefer deepest match (child over parent)
 				if (sym.children) {
 					const child = this.findSymbolAtLine(sym.children, lineNumber);
-					if (child) return child;
+					if (child) {
+						return child;
+					}
 				}
 				return {
 					name: sym.name,

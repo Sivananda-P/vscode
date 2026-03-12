@@ -137,12 +137,8 @@ import { MeteredConnectionChannelClient, METERED_CONNECTION_CHANNEL } from '../.
 import { IPlaywrightService } from '../../../platform/browserView/common/playwrightService.js';
 import { PlaywrightService } from '../../../platform/browserView/node/playwrightService.js';
 import { IBrowserViewGroupRemoteService, BrowserViewGroupRemoteService } from '../../../platform/browserView/node/browserViewGroupRemoteService.js';
-import { IVectorStoreService } from '../../../workbench/services/semanticContext/common/vectorStore.js';
-import { VectorStoreService } from '../../../workbench/services/semanticContext/node/vectorStoreService.js';
-import { VectorStoreChannel } from '../../../workbench/services/semanticContext/common/vectorStoreIpc.js';
-import { INativeEmbeddingService } from '../../../workbench/services/semanticContext/common/nativeEmbeddingService.js';
-import { NativeEmbeddingService } from '../../../workbench/services/semanticContext/node/nativeEmbeddingService.js';
-import { NativeEmbeddingChannel } from '../../../workbench/services/semanticContext/common/nativeEmbeddingServiceIpc.js';
+// VectorStore and NativeEmbedding removed in Phase 8 - now handled by standalone backend bridge.
+
 
 class SharedProcessMain extends Disposable implements IClientConnectionFilter {
 
@@ -414,11 +410,8 @@ class SharedProcessMain extends Disposable implements IClientConnectionFilter {
 		services.set(IBrowserViewGroupRemoteService, new SyncDescriptor(BrowserViewGroupRemoteService));
 		services.set(IPlaywrightService, new SyncDescriptor(PlaywrightService));
 
-		// Vector Store
-		services.set(IVectorStoreService, new SyncDescriptor(VectorStoreService, undefined, true));
+		// VectorStore and NativeEmbedding removed in Phase 8
 
-		// Native Embedding Service
-		services.set(INativeEmbeddingService, new SyncDescriptor(NativeEmbeddingService, undefined, true));
 
 		return new InstantiationService(services);
 	}
@@ -491,13 +484,8 @@ class SharedProcessMain extends Disposable implements IClientConnectionFilter {
 		const playwrightChannel = ProxyChannel.fromService(accessor.get(IPlaywrightService), this._store);
 		this.server.registerChannel('playwright', playwrightChannel);
 
-		// Vector Store
-		const vectorStoreChannel = new VectorStoreChannel(accessor.get(IVectorStoreService));
-		this.server.registerChannel('vectorStore', vectorStoreChannel);
+		// Vector Store and NativeEmbedding removed in Phase 8
 
-		// Native Embedding Service
-		const nativeEmbeddingChannel = new NativeEmbeddingChannel(accessor.get(INativeEmbeddingService));
-		this.server.registerChannel('nativeEmbedding', nativeEmbeddingChannel);
 	}
 
 	private registerErrorHandler(logService: ILogService): void {

@@ -1,7 +1,13 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { IEmbeddingProvider } from '../../common/embeddings.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { INativeEmbeddingService } from '../../common/nativeEmbeddingService.js';
+import { ICodeChunk } from '../../common/semanticIndexer.js';
 
 const LRU_CAPACITY = 512;
 
@@ -46,12 +52,12 @@ export class TransformersEmbeddingProvider implements IEmbeddingProvider {
 		return true;
 	}
 
-	async provideEmbeddings(texts: string[], token: CancellationToken): Promise<Float32Array[]> {
-		const results: Float32Array[] = new Array(texts.length);
+	async provideEmbeddings(inputs: (ICodeChunk | { text: string })[], token: CancellationToken): Promise<Float32Array[]> {
+		const results: Float32Array[] = new Array(inputs.length);
 		const promises: Promise<void>[] = [];
 
-		for (let i = 0; i < texts.length; i++) {
-			const text = texts[i];
+		for (let i = 0; i < inputs.length; i++) {
+			const text = inputs[i].text;
 			const cached = this.cache.get(text);
 			if (cached) {
 				results[i] = cached;

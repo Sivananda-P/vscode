@@ -23,6 +23,7 @@ import { IQuickInputService } from '../../../../platform/quickinput/common/quick
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { Extensions as OutputExt, IOutputChannelRegistry } from '../../output/common/output.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { Extensions as WorkbenchExtensions, IWorkbenchContributionsRegistry } from '../../../common/contributions.js';
 import { LifecyclePhase } from '../../lifecycle/common/lifecycle.js';
 import { registerAction2, Action2 } from '../../../../platform/actions/common/actions.js';
@@ -54,7 +55,8 @@ class SemanticStatusBarContribution extends Disposable {
 	constructor(
 		@ISemanticContextService private readonly semanticService: ISemanticContextService,
 		@IStatusbarService private readonly statusbarService: IStatusbarService,
-		@ILogService private readonly logService: ILogService
+		@ILogService private readonly logService: ILogService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService
 	) {
 		super();
 		this.createStatusBarItem();
@@ -64,11 +66,14 @@ class SemanticStatusBarContribution extends Disposable {
 
 		// Auto-start indexing on startup after a small delay
 		setTimeout(() => {
-			if (this.semanticService.status === 'idle' || (this.semanticService.status as any) === 'unindexed') {
+			const hasWorkspace = this.workspaceContextService.getWorkspace().folders.length > 0;
+			if (hasWorkspace && (this.semanticService.status === 'idle' || (this.semanticService.status as any) === 'unindexed')) {
 				this.logService.info('Semantic Engine: Auto-indexing workspace on startup...');
 				this.semanticService.indexWorkspace(CancellationToken.None).catch(err => {
 					this.logService.error(`Semantic Engine: Auto-index failed: ${err}`);
 				});
+			} else if (!hasWorkspace) {
+				this.logService.info('Semantic Engine: Skipping auto-index, no workspace opened.');
 			}
 		}, 3000);
 	}
@@ -190,8 +195,18 @@ registerAction2(class extends Action2 {
 		const logService = accessor.get(ILogService);
 
 		const editor = editorService.activeTextEditorControl;
+		const channel = outputService.getChannel('semanticContextEngine');
+
 		if (!editor || !('getModel' in editor)) {
 			logService.warn('semantic.debugContext: no active text editor');
+			if (channel) {
+				channel.clear();
+				channel.append('=== Semantic Context Debug ===\n');
+				channel.append('Status: ' + semanticService.status + '\n\n');
+				channel.append('⚠️ No active text editor found.\n');
+				channel.append('Please open a code file and click the button again to see the semantic context for that file.\n');
+				outputService.showChannel('semanticContextEngine');
+			}
 			return;
 		}
 
@@ -201,7 +216,6 @@ registerAction2(class extends Action2 {
 		const position = (editor as any).getPosition();
 		if (!model || !position) return;
 
-		const channel = outputService.getChannel('semanticContextEngine');
 		if (!channel) return;
 
 		channel.clear();

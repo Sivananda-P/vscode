@@ -23,12 +23,17 @@ export interface IVectorStoreService {
 	/** Add chunks and their embeddings to the store. */
 	addChunks(chunks: ICodeChunk[], embeddings: VSBuffer[], skipIndexUpdate?: boolean): Promise<void>;
 
+	/** Index a file by sending its text to the backend for server-side parsing/chunking. Returns chunks count. */
+	indexFile(uri: URI, text: string, languageId: string, skipIndexUpdate?: boolean): Promise<number>;
+
 	/** Delete all chunks for a file. */
 	deleteChunks(uri: URI, skipIndexUpdate?: boolean): Promise<void>;
 
 	/** Rebuild the in-memory spatial index from the database. */
 	rebuildIndex(): Promise<void>;
 	search(queryEmbedding: VSBuffer, limit?: number): Promise<ISearchResult[]>;
+	/** Search the codebase semantically using a text query. */
+	searchByText(query: string, limit?: number): Promise<ISearchResult[]>;
 	getFileMtimes(): Promise<[string, number][]>;
 	close(): Promise<void>;
 }

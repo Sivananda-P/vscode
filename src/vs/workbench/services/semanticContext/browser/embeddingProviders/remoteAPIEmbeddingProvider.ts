@@ -7,6 +7,7 @@ import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { IEmbeddingProvider } from '../../common/embeddings.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { ISecretStorageService } from '../../../../../platform/secrets/common/secrets.js';
+import { ICodeChunk } from '../../common/semanticIndexer.js';
 
 const LRU_CAPACITY = 512;
 
@@ -59,20 +60,21 @@ export class RemoteAPIEmbeddingProvider implements IEmbeddingProvider {
 		return !!this.apiKey;
 	}
 
-	async provideEmbeddings(texts: string[], token: CancellationToken): Promise<Float32Array[]> {
+	async provideEmbeddings(inputs: (ICodeChunk | { text: string })[], token: CancellationToken): Promise<Float32Array[]> {
 		if (!this.apiKey) {
 			this.apiKey = await this.secretStorageService.get('semanticContext.openaiApiKey');
 		}
 		if (!this.apiKey) {
 			this.logService.warn('RemoteAPIEmbeddingProvider: not configured, returning zero vectors');
-			return texts.map(() => new Float32Array(this.embeddingDimension).fill(0));
+			return inputs.map(() => new Float32Array(this.embeddingDimension).fill(0));
 		}
 
 		const results: Float32Array[] = [];
-		for (const text of texts) {
+		for (const input of inputs) {
+			const text = input.text;
 			if (token.isCancellationRequested) {
 				// Fill remaining with zero vectors if cancellation occurs mid-loop
-				while (results.length < texts.length) {
+				while (results.length < inputs.length) {
 					results.push(new Float32Array(this.embeddingDimension).fill(0));
 				}
 				break;
