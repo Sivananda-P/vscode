@@ -29,3 +29,10 @@ test-output.json
 test/componentFixtures/.screenshots/*
 !test/componentFixtures/.screenshots/baseline/
 dist
+*.vscdb
+
+# AI Backend
+ai-backend/.env
+ai-backend/node_modules/
+ai-backend/dist/
+ai-backend/*.cjs
