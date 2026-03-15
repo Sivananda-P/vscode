@@ -32,7 +32,7 @@ export class VectorService {
 	 */
 	static async indexChunks(projectId: string, chunks: { text: string; vector: number[]; metadata: any }[]) {
 		const db = await this.connect();
-		const tableName = `project_${projectId.replace(/[^a-zA-Z0-9]/g, "_")}`;
+		const tableName = `project_${projectId.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
 		try {
 			const table = await db.openTable(tableName);
@@ -50,7 +50,7 @@ export class VectorService {
 
 	static async search(projectId: string, queryVector: number[], k: number = 5) {
 		const db = await this.connect();
-		const tableName = `project_${projectId.replace(/[^a-zA-Z0-9]/g, "_")}`;
+		const tableName = `project_${projectId.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
 		try {
 			const table = await db.openTable(tableName);

@@ -50,7 +50,7 @@ app.post('/ai/query', async (req: Request, res: Response) => {
 				{
 					role: 'system',
 					content: 'You are a professional AI Assistant with tools to read/write files and perform semantic searches. ' +
-						'Analyze the initial context provided below to answer the users query' +
+						'Analyze the initial context provided below to answer the user\'s query. ' +
 						`\n\nInitial Context:\n${contextText}`
 				},
 				{ role: 'user', content: prompt }
@@ -131,7 +131,7 @@ app.post('/search', async (req: Request, res: Response) => {
 	const { query, projectId, k } = req.body;
 
 	try {
-		console.log(`[Vector] Semantic search: "${query}" in project: ${projectId}`);
+		console.log(`[Vector] Semantic search: '${query}' in project: ${projectId}`);
 		const queryVector = await AiService.generateEmbeddings(query);
 		const results = await VectorService.search(projectId, queryVector as number[], k || 5);
 
