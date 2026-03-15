@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { AzureOpenAI } from 'openai';
+import type { ChatCompletionMessageParam, ChatCompletionTool, ChatCompletionSystemMessageParam } from 'openai/resources/index';
 import dotenv from 'dotenv';
 import { pipeline } from '@xenova/transformers';
 
@@ -146,7 +147,7 @@ export const TOOLS = [
 			}
 		}
 	}
-] as const;
+] satisfies ChatCompletionTool[];
 
 export class AiService {
 	private static extractor: any = null;
@@ -158,9 +159,9 @@ export class AiService {
 		return this.extractor;
 	}
 
-	static async generateResponse(messages: any[]) {
+	static async generateResponse(messages: ChatCompletionMessageParam[]) {
 		// Consolidate system messages into the first slot
-		const systemMessages = messages.filter(m => m.role === 'system');
+		const systemMessages = messages.filter((m): m is ChatCompletionSystemMessageParam => m.role === 'system');
 		const otherMessages = messages.filter(m => m.role !== 'system');
 
 		const baseSystemPrompt = `You are CogniAI, the world's most advanced autonomous AI software engineering agent. You are NOT a chatbot; you are a builder.
@@ -183,17 +184,17 @@ When you finish, give a 1-sentence summary of the actions taken. Let the results
 
 		const finalSystemContent = baseSystemPrompt + (systemMessages.length > 0 ? '\n\nContext and Instructions:\n' + systemMessages.map(m => m.content).join('\n') : '');
 
-		const finalMessages = [
+		const finalMessages: ChatCompletionMessageParam[] = [
 			{ role: 'system', content: finalSystemContent },
 			...otherMessages
 		];
 
-		console.log(`[Azure AI] Messages: ${finalMessages.length}, System Prompt Length: ${finalMessages[0].content.length}`);
+		console.log(`[Azure AI] Messages: ${finalMessages.length}, System Prompt Length: ${finalMessages[0]?.content?.length ?? 0}`);
 
 		const chatCompletion = await azureClient.chat.completions.create({
-			messages: finalMessages as any,
-			model: process.env.AZURE_OPENAI_DEPLOYMENT_NAME || '', // Azure uses deployment name as model
-			tools: TOOLS as any,
+			messages: finalMessages,
+			model: process.env.AZURE_OPENAI_DEPLOYMENT_NAME || '',
+			tools: TOOLS,
 			tool_choice: 'auto'
 		});
 
