@@ -1,9 +1,14 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import { AiService } from "./services/ai.service";
-import { VectorService } from "./services/vector.service";
-import { AstService } from "./services/ast.service";
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import express, { Request, Response } from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { AiService } from './services/ai.service';
+import { VectorService } from './services/vector.service';
+import { AstService } from './services/ast.service';
 
 dotenv.config();
 
@@ -20,8 +25,12 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 3000;
 
 // --- AI Query Endpoint (RAG) ---
-app.post("/ai/query", async (req: express.Request, res: express.Response) => {
-	const { prompt, projectId, messages: clientMessages } = req.body;
+app.post('/ai/query', async (req: Request, res: Response) => {
+	const { prompt, projectId = 'default_project', messages: clientMessages } = req.body;
+
+	if (prompt === 'ping') {
+		return res.json({ response: 'pong' });
+	}
 
 	try {
 		let messages = clientMessages || [];
@@ -35,16 +44,16 @@ app.post("/ai/query", async (req: express.Request, res: express.Response) => {
 			// 2. Vector Search
 			console.log(`[Vector] Searching LanceDB for project: ${projectId}...`);
 			const contextResults = await VectorService.search(projectId, queryVector as number[]);
-			const contextText = contextResults.map((r: any) => r.text).join("\n\n---\n\n");
+			const contextText = contextResults.map((r: any) => r.text).join('\n\n---\n\n');
 
 			messages = [
 				{
-					role: "system",
-					content: "You are a professional AI Assistant with tools to read/write files and perform semantic searches. " +
-						"Analyze the initial context provided below to answer the user's query. " +
+					role: 'system',
+					content: 'You are a professional AI Assistant with tools to read/write files and perform semantic searches. ' +
+						'Analyze the initial context provided below to answer the users query' +
 						`\n\nInitial Context:\n${contextText}`
 				},
-				{ role: "user", content: prompt }
+				{ role: 'user', content: prompt }
 			];
 		}
 
@@ -55,19 +64,19 @@ app.post("/ai/query", async (req: express.Request, res: express.Response) => {
 		res.json({ response, tool_calls });
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
-		console.error("AI Query Error:", message);
+		console.error('AI Query Error:', message);
 		res.status(500).json({ error: message });
 	}
 });
 
 // --- Indexing Endpoint ---
-app.post("/embeddings/index", async (req: express.Request, res: express.Response) => {
+app.post('/embeddings/index', async (req: Request, res: Response) => {
 	const { projectId, chunks } = req.body; // chunks: Array of { text, metadata }
 
 	try {
 		const texts = chunks.map((c: any) => c.text);
 		console.log(`[AI] Generating embeddings for ${texts.length} chunks...`);
-		const vectors = await AiService.generateEmbeddings(texts);
+		const vectors = await AiService.generateEmbeddings(texts) as number[][];
 
 		const formattedChunks = chunks.map((c: any, i: number) => ({
 			text: c.text,
@@ -80,13 +89,13 @@ app.post("/embeddings/index", async (req: express.Request, res: express.Response
 		res.json({ success: true, count: chunks.length });
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
-		console.error("Indexing Error:", message);
+		console.error('Indexing Error:', message);
 		res.status(500).json({ error: message });
 	}
 });
 
 // --- Server-Side AST Indexing Endpoint ---
-app.post("/embeddings/index-file", async (req: express.Request, res: express.Response) => {
+app.post('/embeddings/index-file', async (req: Request, res: Response) => {
 	const { projectId, uri, text, languageId } = req.body;
 
 	try {
@@ -112,13 +121,13 @@ app.post("/embeddings/index-file", async (req: express.Request, res: express.Res
 		res.json({ success: true, count: chunks.length });
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
-		console.error("Server-Side Indexing Error:", message);
+		console.error('Server-Side Indexing Error:', message);
 		res.status(500).json({ error: message });
 	}
 });
 
 // --- Semantic Search Endpoint (for Agent Tool Use) ---
-app.post("/search", async (req: express.Request, res: express.Response) => {
+app.post('/search', async (req: Request, res: Response) => {
 	const { query, projectId, k } = req.body;
 
 	try {
@@ -135,7 +144,7 @@ app.post("/search", async (req: express.Request, res: express.Response) => {
 		res.json({ results: formatted });
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
-		console.error("Search Error:", message);
+		console.error('Search Error:', message);
 		res.status(500).json({ error: message });
 	}
 });

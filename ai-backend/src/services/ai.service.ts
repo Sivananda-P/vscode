@@ -1,55 +1,148 @@
-import Groq from "groq-sdk";
-import dotenv from "dotenv";
-import { pipeline } from "@xenova/transformers";
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import { AzureOpenAI } from 'openai';
+import dotenv from 'dotenv';
+import { pipeline } from '@xenova/transformers';
 
 dotenv.config();
 
-const groq = new Groq({
-	apiKey: process.env.GROQ_API_KEY || "",
+const azureClient = new AzureOpenAI({
+	apiKey: process.env.AZURE_OPENAI_API_KEY || '',
+	endpoint: process.env.AZURE_OPENAI_ENDPOINT || '',
+	apiVersion: process.env.AZURE_OPENAI_API_VERSION || '2024-05-01-preview',
+	deployment: process.env.AZURE_OPENAI_DEPLOYMENT_NAME || '',
 });
 
 export const TOOLS = [
 	{
-		type: "function",
+		type: 'function',
 		function: {
-			name: "semantic_search",
-			description: "Search the codebase using semantic context to find relevant files and code chunks.",
+			name: 'semantic_search',
+			description: 'Search the codebase using vector embeddings to find relevant code blocks such as functions, classes, and modules.',
 			parameters: {
-				type: "object",
+				type: 'object',
 				properties: {
-					query: { type: "string", description: "The natural language search query." },
-					k: { type: "number", description: "Number of results to return (default 5)." }
+					query: { type: 'string', description: 'The natural language search query.' },
+					k: { type: 'number', description: 'Number of results to return (default 5).' }
 				},
-				required: ["query"]
+				required: ['query']
 			}
 		}
 	},
 	{
-		type: "function",
+		type: 'function',
 		function: {
-			name: "read_file",
-			description: "Read the contents of a file in the workspace.",
+			name: 'read_file',
+			description: 'Read the contents of a file in the workspace.',
 			parameters: {
-				type: "object",
+				type: 'object',
 				properties: {
-					path: { type: "string", description: "The relative path to the file." }
+					path: { type: 'string', description: 'The relative path to the file.' }
 				},
-				required: ["path"]
+				required: ['path']
 			}
 		}
 	},
 	{
-		type: "function",
+		type: 'function',
 		function: {
-			name: "write_file",
-			description: "Update or create a file in the workspace.",
+			name: 'write_file',
+			description: 'Overwrite a file with updated code. Use only for bug fixes, new features, or refactorings.',
 			parameters: {
-				type: "object",
+				type: 'object',
 				properties: {
-					path: { type: "string", description: "The relative path to the file." },
-					content: { type: "string", description: "The new content for the file." }
+					path: { type: 'string', description: 'The relative path to the file.' },
+					content: { type: 'string', description: 'The new content for the file.' }
 				},
-				required: ["path", "content"]
+				required: ['path', 'content']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'apply_patch',
+			description: 'Apply a structured modification to an existing file using a minimal diff.',
+			parameters: {
+				type: 'object',
+				properties: {
+					path: { type: 'string', description: 'The relative path to the file.' },
+					patch: { type: 'string', description: 'The diff/patch content.' }
+				},
+				required: ['path', 'patch']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'get_diagnostics',
+			description: 'Retrieve IDE diagnostics such as lint errors, type errors, and warnings for the current workspace or a specific file.',
+			parameters: {
+				type: 'object',
+				properties: {
+					path: { type: 'string', description: 'Optional relative path to filter diagnostics.' }
+				}
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'go_to_definition',
+			description: 'Find the implementation location of a symbol using language services.',
+			parameters: {
+				type: 'object',
+				properties: {
+					symbol: { type: 'string', description: 'The name of the symbol to find.' },
+					path: { type: 'string', description: 'The file path where the symbol is referenced.' }
+				},
+				required: ['symbol', 'path']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'create_folder',
+			description: 'Create a new folder in the workspace.',
+			parameters: {
+				type: 'object',
+				properties: {
+					path: { type: 'string', description: 'The relative path to the folder.' }
+				},
+				required: ['path']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'delete_file',
+			description: 'Delete a file or folder in the workspace.',
+			parameters: {
+				type: 'object',
+				properties: {
+					path: { type: 'string', description: 'The relative path to the file or folder.' }
+				},
+				required: ['path']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'list_dir',
+			description: 'List the contents of a directory.',
+			parameters: {
+				type: 'object',
+				properties: {
+					path: { type: 'string', description: 'The relative path to the directory.' }
+				},
+				required: ['path']
 			}
 		}
 	}
@@ -70,79 +163,43 @@ export class AiService {
 		const systemMessages = messages.filter(m => m.role === 'system');
 		const otherMessages = messages.filter(m => m.role !== 'system');
 
-		const baseSystemPrompt = "You are a professional AI Assistant with tools to read/write files and perform semantic searches. " +
-			"If you need to use a tool, use the function calling mechanism. " +
-			"CRITICAL: Do not output any text or tags like <function> when calling a tool. " +
-			"Provide a clear and concise response once you have the tool results.";
+		const baseSystemPrompt = `You are CogniAI, the world's most advanced autonomous AI software engineering agent. You are NOT a chatbot; you are a builder.
+Your workspace is the user's IDE, and your tools are your hands. Your goal is to fulfill user requests by directly manipulating the codebase.
 
-		const finalSystemContent = baseSystemPrompt + (systemMessages.length > 0 ? "\n\nContext and Instructions:\n" + systemMessages.map(m => m.content).join("\n") : "");
+EXECUTION PROTOCOL:
+1. ALWAYS ACT FIRST: If a user asks to build or fix something, do not explain how you will do it. USE YOUR TOOLS immediately.
+2. MULTI-STEP REASONING: Use your 10-turn limit to perform complex workflows. (e.g., list_dir -> read_file -> analyze -> create_folder -> write_multiple_files -> verify with get_diagnostics).
+3. WORKSPACE INTEGRITY: Never provide partial code or snippets in chat if they belong in a file. Use 'write_file' or 'apply_patch' for at least 90% of your output.
+4. PROACTIVE EXPLORATION: If context is missing, use 'semantic_search' or 'list_dir' without asking. If you see an error, fix it.
+5. NO PLACEHOLDERS: Always write complete, production-ready, professional code. Never use "implement logic here" comments.
+6. IDENTITY: You are CogniAI. You are senior, precise, and autonomous.
+
+TOOL PRIORITY:
+- Use 'write_file' for new files or complete overwrites.
+- Use 'apply_patch' for surgical edits.
+- Use 'get_diagnostics' after every major change to ensure you haven't broken anything.
+
+When you finish, give a 1-sentence summary of the actions taken. Let the results in the workspace speak for themselves.`;
+
+		const finalSystemContent = baseSystemPrompt + (systemMessages.length > 0 ? '\n\nContext and Instructions:\n' + systemMessages.map(m => m.content).join('\n') : '');
 
 		const finalMessages = [
-			{ role: "system", content: finalSystemContent },
+			{ role: 'system', content: finalSystemContent },
 			...otherMessages
 		];
 
-		console.log(`[Groq] Messages: ${finalMessages.length}, System Prompt Length: ${finalMessages[0].content.length}`);
+		console.log(`[Azure AI] Messages: ${finalMessages.length}, System Prompt Length: ${finalMessages[0].content.length}`);
 
-		const chatCompletion = await groq.chat.completions.create({
-			messages: finalMessages,
-			model: "llama-3.3-70b-versatile",
+		const chatCompletion = await azureClient.chat.completions.create({
+			messages: finalMessages as any,
+			model: process.env.AZURE_OPENAI_DEPLOYMENT_NAME || '', // Azure uses deployment name as model
 			tools: TOOLS as any,
-			tool_choice: "auto"
+			tool_choice: 'auto'
 		});
 
 		const message = chatCompletion.choices[0]?.message;
-
-		// Fallback: If the model output a JSON string or custom tags instead of a tool call
-		let tool_calls = message?.tool_calls || [];
-		let content = message?.content || "";
-
-		if (!tool_calls || tool_calls.length === 0) {
-			// 1. Check for <function=name{...}</function> tags (Groq custom format)
-			// Format can be: <function=read_file{"path": "..."}></function> or <function=read_file {"path": "..."}></function>
-			const tagRegex = /<function=(\w+)\s*(\{[\s\S]*?\})\s*<\/function>/;
-			const match = content.match(tagRegex);
-
-			if (match) {
-				const name = match[1];
-				const argsText = match[2].trim();
-				console.log(`[Groq Fallback] Caught custom tag: ${name}, args: ${argsText}`);
-				tool_calls = [{
-					id: "manual_tag_" + Date.now(),
-					type: "function",
-					function: {
-						name: name,
-						arguments: argsText
-					}
-				}];
-				content = "";
-			}
-			// 2. Check for raw JSON in content
-			else if (content.trim().startsWith('{') || content.includes('"name"')) {
-				try {
-					// Find the JSON block if there's surrounding text
-					const jsonMatch = content.match(/(\{[\s\S]*\})/);
-					if (jsonMatch) {
-						const potentialTool = JSON.parse(jsonMatch[1]);
-						const name = potentialTool.name || potentialTool.function?.name;
-						const args = potentialTool.arguments || potentialTool.parameters || potentialTool.function?.arguments;
-
-						if (name) {
-							console.log(`[Groq Fallback] Manually parsed tool call: ${name}`);
-							tool_calls = [{
-								id: "manual_json_" + Date.now(),
-								type: "function",
-								function: {
-									name: name,
-									arguments: typeof args === 'string' ? args : JSON.stringify(args || {})
-								}
-							}];
-							content = "";
-						}
-					}
-				} catch { /* ignore */ }
-			}
-		}
+		const tool_calls = message?.tool_calls || [];
+		const content = message?.content || '';
 
 		return {
 			response: content,

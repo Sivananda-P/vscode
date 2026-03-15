@@ -18,10 +18,9 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { IProgressService, ProgressLocation, IProgress, IProgressStep } from '../../../../platform/progress/common/progress.js';
 import { IStatusbarService, StatusbarAlignment, IStatusbarEntryAccessor } from '../../../services/statusbar/browser/statusbar.js';
 import { IEditorService } from '../../editor/common/editorService.js';
-import { IOutputService } from '../../output/common/output.js';
+import { IOutputService, Extensions as OutputExt, IOutputChannelRegistry } from '../../output/common/output.js';
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
-import { Extensions as OutputExt, IOutputChannelRegistry } from '../../output/common/output.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { Extensions as WorkbenchExtensions, IWorkbenchContributionsRegistry } from '../../../common/contributions.js';
@@ -64,10 +63,14 @@ class SemanticStatusBarContribution extends Disposable {
 		this._register(this.semanticService.onDidIndexProgress(p => this.updateProgress(p)));
 		this.updateItem(this.semanticService.status);
 
-		// Auto-start indexing on startup after a small delay
+		// Auto-start indexing on startup after a larger delay to allow extension host and search providers to stabilize
 		setTimeout(() => {
+			if (!this.semanticService.isAvailable) {
+				this.logService.info('Semantic Engine: Skipping auto-index, AI Backend not reachable.');
+				return;
+			}
 			const hasWorkspace = this.workspaceContextService.getWorkspace().folders.length > 0;
-			if (hasWorkspace && (this.semanticService.status === 'idle' || (this.semanticService.status as any) === 'unindexed')) {
+			if (hasWorkspace && (this.semanticService.status === 'idle' || this.semanticService.status === 'unindexed')) {
 				this.logService.info('Semantic Engine: Auto-indexing workspace on startup...');
 				this.semanticService.indexWorkspace(CancellationToken.None).catch(err => {
 					this.logService.error(`Semantic Engine: Auto-index failed: ${err}`);
@@ -75,7 +78,7 @@ class SemanticStatusBarContribution extends Disposable {
 			} else if (!hasWorkspace) {
 				this.logService.info('Semantic Engine: Skipping auto-index, no workspace opened.');
 			}
-		}, 3000);
+		}, 10000);
 	}
 
 	private createStatusBarItem(): void {
@@ -94,17 +97,20 @@ class SemanticStatusBarContribution extends Disposable {
 	}
 
 	private updateItem(status: SemanticIndexStatus): void {
-		if (!this.item) return;
+		if (!this.item) {
+			return;
+		}
 		let text = '';
 		let tooltip = '';
-		let backgroundColor: any = undefined;
+		let backgroundColor: { id: string } | undefined = undefined;
 
 		switch (status) {
-			case 'building':
+			case 'building': {
 				const percent = this.lastProgress ? Math.round((this.lastProgress.processed / this.lastProgress.total) * 100) : 0;
 				text = `$(sync~spin) Semantic Index: Building${percent > 0 ? ` ${percent}%` : ''}`;
 				tooltip = localize('buildingStatus', "Building semantic index for the workspace...");
 				break;
+			}
 			case 'ready':
 				text = `$(check) Semantic Index: Ready`;
 				tooltip = localize('readyStatus', "Semantic Index is ready for AI context queries");
@@ -214,7 +220,7 @@ registerAction2(class extends Action2 {
 		const model = (editor as any).getModel();
 		// eslint-disable-next-line local/code-no-any-casts
 		const position = (editor as any).getPosition();
-		if (!model || !position) return;
+		if (!model || !position || !model.uri) return;
 
 		if (!channel) return;
 
@@ -224,7 +230,6 @@ registerAction2(class extends Action2 {
 		channel.append(`Position: L${position.lineNumber}:${position.column}\n`);
 		channel.append(`Status: ${semanticService.status}\n\n`);
 		channel.append(`Computing full layered context (this may take a few seconds)...\n`);
-		outputService.showChannel('semanticContextEngine');
 
 		const ctx = await semanticService.getLayeredContext(
 			model.uri,

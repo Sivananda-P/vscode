@@ -40,6 +40,9 @@ export interface ISemanticContextService {
 
 	/** Legacy helper — returns assembled prompt string directly. */
 	getContext(uri: URI, position: IPosition, token: CancellationToken): Promise<string>;
+
+	/** Whether the backend is reachable. */
+	readonly isAvailable: boolean;
 }
 
 export interface IPosition {

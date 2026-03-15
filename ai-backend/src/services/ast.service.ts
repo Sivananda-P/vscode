@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 import * as ts from 'typescript';
 
 export interface ICodeChunk {
@@ -31,8 +36,9 @@ export class AstService {
 					const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
 
 					let symbolName = 'anonymous';
-					if ((node as any).name) {
-						symbolName = (node as any).name.getText(sourceFile);
+					const namedNode = node as { name?: ts.Node };
+					if (namedNode.name && ts.isIdentifier(namedNode.name)) {
+						symbolName = namedNode.name.getText(sourceFile);
 					}
 
 					const range = {

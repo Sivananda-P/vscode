@@ -74,7 +74,7 @@ export class LinksList {
 
 	readonly links: Link[];
 
-	private readonly _disposables: DisposableStore | undefined = new DisposableStore();
+	private _disposables: DisposableStore | undefined;
 
 	constructor(tuples: [ILinksList, LinkProvider][]) {
 
@@ -94,6 +94,7 @@ export class LinksList {
 
 	dispose(): void {
 		this._disposables?.dispose();
+		this._disposables = undefined;
 		this.links.length = 0;
 	}
 

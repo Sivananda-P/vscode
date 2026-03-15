@@ -19,6 +19,10 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 export class VectorStoreServiceClient extends Disposable implements IVectorStoreService {
 	declare readonly _serviceBrand: undefined;
 
+	private backendAvailable = true;
+	private lastCheckTime = 0;
+	private readonly CHECK_INTERVAL = 30000; // 30 seconds
+
 	constructor(
 		@IAIService private readonly aiService: IAIService,
 		@ILogService private readonly logService: ILogService
@@ -27,16 +31,43 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 	}
 
 	async init(): Promise<void> {
-		// Connectivity check with backend
+		this.lastCheckTime = Date.now();
 		try {
 			await this.aiService.request('http://127.0.0.1:3000/ai/query', { prompt: 'ping' }, CancellationToken.None);
+			this.backendAvailable = true;
 			this.logService.info('VectorStoreServiceClient: Backend connectivity verified.');
 		} catch (err) {
-			this.logService.warn('VectorStoreServiceClient: Backend not reachable yet.');
+			this.backendAvailable = false;
+			this.logService.warn('VectorStoreServiceClient: Backend not reachable. Semantic features will be limited.');
+		}
+	}
+
+	private async checkConnectivity(): Promise<boolean> {
+		if (this.backendAvailable) {
+			return true;
+		}
+
+		const now = Date.now();
+		if (now - this.lastCheckTime < this.CHECK_INTERVAL) {
+			return false;
+		}
+
+		this.lastCheckTime = now;
+		try {
+			await this.aiService.request('http://127.0.0.1:3000/ai/query', { prompt: 'ping' }, CancellationToken.None);
+			this.backendAvailable = true;
+			this.logService.info('VectorStoreServiceClient: Backend connectivity restored.');
+			return true;
+		} catch {
+			return false;
 		}
 	}
 
 	async addChunks(chunks: ICodeChunk[], embeddings: VSBuffer[], skipIndexUpdate?: boolean): Promise<void> {
+		if (!(await this.checkConnectivity())) {
+			return;
+		}
+
 		const backendUrl = 'http://127.0.0.1:3000/embeddings/index';
 
 		// Prepare chunks with metadata for the backend
@@ -58,6 +89,7 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 				chunks: backendChunks
 			}, CancellationToken.None);
 		} catch (err) {
+			this.backendAvailable = false;
 			this.logService.error(`VectorStoreServiceClient: Indexing failed: ${err}`);
 		}
 	}
@@ -77,6 +109,10 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 	}
 
 	async indexFile(uri: URI, text: string, languageId: string, skipIndexUpdate?: boolean): Promise<number> {
+		if (!(await this.checkConnectivity())) {
+			return 0;
+		}
+
 		const backendUrl = 'http://127.0.0.1:3000/embeddings/index-file';
 		try {
 			const response = await this.aiService.request(backendUrl, {
@@ -88,6 +124,7 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 			}, CancellationToken.None) as { count: number };
 			return response.count || 0;
 		} catch (err) {
+			this.backendAvailable = false;
 			this.logService.error(`VectorStoreServiceClient: indexFile failed: ${err}`);
 			return 0;
 		}
@@ -95,6 +132,10 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 
 	/** New professional search that takes a text query. */
 	async searchByText(query: string, limit = 10): Promise<ISearchResult[]> {
+		if (!(await this.checkConnectivity())) {
+			return [];
+		}
+
 		const backendUrl = 'http://127.0.0.1:3000/search';
 		try {
 			const response = await this.aiService.request(backendUrl, {
@@ -112,6 +153,7 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 				symbolType: r.metadata.symbolType
 			}));
 		} catch (err) {
+			this.backendAvailable = false;
 			this.logService.error(`VectorStoreServiceClient: Search failed: ${err}`);
 			return [];
 		}

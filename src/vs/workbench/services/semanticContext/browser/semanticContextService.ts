@@ -47,6 +47,11 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		}
 	}
 
+	get isAvailable(): boolean {
+		// eslint-disable-next-line local/code-no-any-casts
+		return (this.vectorStore as any).backendAvailable ?? true;
+	}
+
 	private readonly _onDidIndexProgress = this._register(new Emitter<IIndexProgress>());
 	readonly onDidIndexProgress: Event<IIndexProgress> = this._onDidIndexProgress.event;
 

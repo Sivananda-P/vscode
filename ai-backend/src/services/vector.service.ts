@@ -1,7 +1,12 @@
-import * as lancedb from "@lancedb/lancedb";
-import path from "path";
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
 
-const DB_PATH = path.join(process.cwd(), "data", "lancedb");
+import * as lancedb from '@lancedb/lancedb';
+import path from 'path';
+
+const DB_PATH = path.join(process.cwd(), 'data', 'lancedb');
 
 export class VectorService {
 	private static db: lancedb.Connection | null = null;
