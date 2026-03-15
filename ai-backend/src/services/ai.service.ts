@@ -26,7 +26,7 @@ export const TOOLS = [
 			parameters: {
 				type: 'object',
 				properties: {
-					query: { type: 'string', description: 'The natural language search query.' },
+					query: { type: 'string', description: 'The natural language search query. Use this to find code across the entire workspace.' },
 					k: { type: 'number', description: 'Number of results to return (default 5).' }
 				},
 				required: ['query']
@@ -141,9 +141,23 @@ export const TOOLS = [
 			parameters: {
 				type: 'object',
 				properties: {
-					path: { type: 'string', description: 'The relative path to the directory.' }
+					path: { type: 'string', description: 'The relative path to the directory. Use "." for the workspace root.' }
 				},
 				required: ['path']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'run_terminal',
+			description: 'Run a shell command in the workspace terminal. Use to install packages, run builds, run tests, or execute scripts.',
+			parameters: {
+				type: 'object',
+				properties: {
+					command: { type: 'string', description: 'The shell command to execute (e.g. "npm install", "git status").' }
+				},
+				required: ['command']
 			}
 		}
 	}
@@ -161,46 +175,125 @@ export class AiService {
 
 	static async generateResponse(messages: ChatCompletionMessageParam[]) {
 		// Consolidate system messages into the first slot
-		const systemMessages = messages.filter((m): m is ChatCompletionSystemMessageParam => m.role === 'system');
-		const otherMessages = messages.filter(m => m.role !== 'system');
+		const systemMessages = messages.filter((m): m is ChatCompletionSystemMessageParam => m?.role === 'system');
+		const otherMessages = messages.filter(m => m && m.role !== 'system');
 
-		const baseSystemPrompt = `You are CogniAI, the world's most advanced autonomous AI software engineering agent. You are NOT a chatbot; you are a builder.
-Your workspace is the user's IDE, and your tools are your hands. Your goal is to fulfill user requests by directly manipulating the codebase.
+		const baseSystemPrompt = `You are CogniAI, an autonomous AI software engineering agent integrated inside the user's IDE.
 
-EXECUTION PROTOCOL:
-1. ALWAYS ACT FIRST: If a user asks to build or fix something, do not explain how you will do it. USE YOUR TOOLS immediately.
-2. MULTI-STEP REASONING: Use your 10-turn limit to perform complex workflows. (e.g., list_dir -> read_file -> analyze -> create_folder -> write_multiple_files -> verify with get_diagnostics).
-3. WORKSPACE INTEGRITY: Never provide partial code or snippets in chat if they belong in a file. Use 'write_file' or 'apply_patch' for at least 90% of your output.
-4. PROACTIVE EXPLORATION: If context is missing, use 'semantic_search' or 'list_dir' without asking. If you see an error, fix it.
-5. NO PLACEHOLDERS: Always write complete, production-ready, professional code. Never use "implement logic here" comments.
-6. IDENTITY: You are CogniAI. You are senior, precise, and autonomous.
+You are NOT a chatbot. You are an autonomous builder whose job is to analyze, modify, and create files inside the user's workspace using tools.
 
-TOOL PRIORITY:
-- Use 'write_file' for new files or complete overwrites.
-- Use 'apply_patch' for surgical edits.
-- Use 'get_diagnostics' after every major change to ensure you haven't broken anything.
+---
 
-When you finish, give a 1-sentence summary of the actions taken. Let the results in the workspace speak for themselves.`;
+PRIMARY OBJECTIVE:
+Complete the user's request by directly interacting with the workspace using tools. Never stop because files do not exist. If something is missing — CREATE IT.
+
+---
+
+MANDATORY WORKFLOW (follow this for EVERY task):
+
+STEP 1 — ANALYZE WORKSPACE
+Always start with: list_dir(".")
+If empty, create the required structure immediately.
+
+STEP 2 — LOCATE RELEVANT CODE
+If project has files, use semantic_search and read_file.
+NEVER modify a file without reading it first.
+
+STEP 3 — IMPLEMENT SOLUTION
+- Use apply_patch for editing existing files
+- Use write_file for new files
+- Use create_folder if folders are missing
+- Use delete_file if something must be removed
+Modify files sequentially. Write code INTO files. Never paste code into chat.
+
+STEP 4 — VERIFY
+After writing or editing code, call get_diagnostics.
+If errors exist, fix them immediately. Repeat until no errors.
+
+---
+
+FILE CREATION POLICY:
+If the user asks to build something and workspace files don't exist — create the ENTIRE structure automatically.
+Example: "create a signup page" → create_folder → write_file HTML → write_file CSS → done.
+Do NOT ask for confirmation. Just build.
+
+---
+
+TOOL PRIORITY ORDER:
+1. list_dir
+2. semantic_search
+3. read_file
+4. apply_patch
+5. write_file
+6. create_folder
+7. delete_file
+8. get_diagnostics
+
+---
+
+IMPORTANT RULES:
+- NEVER say "files do not exist" and stop. Create them.
+- Always move forward. Complete the task.
+- Chat is secondary. Use it only after finishing. Keep it short.
+- All paths are relative to workspace root (".").
+- If user says "in folder X" and X is the project name, use ".".
+
+---
+
+IDENTITY: You are a senior autonomous software engineer. Think in systems and files. Stop explaining. Start building.`;
 
 		const finalSystemContent = baseSystemPrompt + (systemMessages.length > 0 ? '\n\nContext and Instructions:\n' + systemMessages.map(m => m.content).join('\n') : '');
 
-		const finalMessages: ChatCompletionMessageParam[] = [
-			{ role: 'system', content: finalSystemContent },
+		// Validate message sequence: 'tool' role messages must be preceded by 'assistant' with tool_calls
+		// Azure OpenAI is strict about this ordering
+		const allMessages: ChatCompletionMessageParam[] = [
+			{ role: 'system' as const, content: finalSystemContent },
 			...otherMessages
 		];
+		const validatedMessages: ChatCompletionMessageParam[] = [];
+		for (let i = 0; i < allMessages.length; i++) {
+			const msg = allMessages[i];
+			if (msg.role === 'tool') {
+				// Check that previous message is assistant with tool_calls
+				const prev = validatedMessages[validatedMessages.length - 1];
+				if (!prev || prev.role !== 'assistant' || !(prev as any).tool_calls?.length) {
+					// Skip orphaned tool messages — they cause the empty response error
+					console.warn('[Azure AI] Skipping orphaned tool message (no preceding assistant tool_call)');
+					continue;
+				}
+			}
+			validatedMessages.push(msg);
+		}
 
-		console.log(`[Azure AI] Messages: ${finalMessages.length}, System Prompt Length: ${finalMessages[0]?.content?.length ?? 0}`);
+		console.log(`[Azure AI] Sending ${validatedMessages.length} validated messages`);
 
 		const chatCompletion = await azureClient.chat.completions.create({
-			messages: finalMessages,
+			messages: validatedMessages,
 			model: process.env.AZURE_OPENAI_DEPLOYMENT_NAME || '',
 			tools: TOOLS,
 			tool_choice: 'auto'
 		});
 
-		const message = chatCompletion.choices[0]?.message;
+		const choice = chatCompletion.choices[0];
+		const message = choice?.message;
+		const finish_reason = choice?.finish_reason;
 		const tool_calls = message?.tool_calls || [];
 		const content = message?.content || '';
+
+		console.log(`[Azure AI] finish_reason: ${finish_reason}, tool_calls: ${tool_calls.length}, content_len: ${content.length}`);
+
+		if (tool_calls.length > 0) {
+			console.log(`[Azure AI] Tool calls: ${tool_calls.map((tc: any) => tc.function?.name).filter(Boolean).join(', ')}`);
+		}
+
+		// Guard: if both are empty (model misfired), return a safe fallback
+		if (!content && tool_calls.length === 0) {
+			console.warn('[Azure AI] Empty response from model — returning safe fallback');
+			return {
+				response: 'I encountered an issue processing that request. Please try again.',
+				tool_calls: []
+			};
+		}
 
 		return {
 			response: content,

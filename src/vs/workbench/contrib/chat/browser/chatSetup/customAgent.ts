@@ -7,17 +7,50 @@ import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Disposable, DisposableStore, IDisposable } from '../../../../../base/common/lifecycle.js';
 import { IChatAgentHistoryEntry, IChatAgentImplementation, IChatAgentRequest, IChatAgentResult, IChatAgentService } from '../../common/participants/chatAgents.js';
-import { IChatProgress } from '../../common/chatService/chatService.js';
+import { IChatProgress, IChatTaskDto, IChatTask } from '../../common/chatService/chatService.js';
+import { IChatProgressHistoryResponseContent } from '../../common/model/chatModel.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ChatAgentLocation, ChatModeKind } from '../../common/constants.js';
 import { nullExtensionDescription } from '../../../../services/extensions/common/extensions.js';
 import { IAIService } from '../../../../../platform/ai/common/ai.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { ISemanticContextService } from '../../../../services/semanticContext/common/semanticContext.js';
+import { ISearchResult } from '../../../../services/semanticContext/common/vectorStore.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { VSBuffer } from '../../../../../base/common/buffer.js';
 import { IMarkerService, MarkerSeverity } from '../../../../../platform/markers/common/markers.js';
 import { URI } from '../../../../../base/common/uri.js';
+import { relativePath } from '../../../../../base/common/resources.js';
+import { ILanguageFeaturesService } from '../../../../../editor/common/services/languageFeatures.js';
+import { IModelService } from '../../../../../editor/common/services/model.js';
+import { getDefinitionsAtPosition } from '../../../../../editor/contrib/gotoSymbol/browser/goToSymbol.js';
+import { Position } from '../../../../../editor/common/core/position.js';
+import { Range } from '../../../../../editor/common/core/range.js';
+import { IEditorService } from '../../../../services/editor/common/editorService.js';
+ 
+interface IToolCall {
+	id: string;
+	type: string;
+	function: { name: string; arguments: string };
+}
+
+interface IChatMessage {
+	role: 'system' | 'user' | 'assistant' | 'tool';
+	content?: string;
+	tool_calls?: IToolCall[];
+	tool_call_id?: string;
+	name?: string;
+}
+
+/** Join a workspace root URI with a relative path safely */
+function joinWorkspacePath(root: typeof import('../../../../../base/common/uri.js').URI.prototype, relative: string) {
+	if (relative === '.' || relative === '' || relative === '/') {
+		return root;
+	}
+	// Remove leading slash/dot-slash
+	const clean = relative.replace(/^\.?\//, '');
+	return root.with({ path: root.path + '/' + clean });
+}
 
 export class CustomAgent extends Disposable implements IChatAgentImplementation {
 
@@ -63,20 +96,60 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 		@ISemanticContextService private readonly semanticContextService: ISemanticContextService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@IMarkerService private readonly markerService: IMarkerService,
+		@ILanguageFeaturesService private readonly languageFeaturesService: ILanguageFeaturesService,
+		@IModelService private readonly modelService: IModelService,
+		@IEditorService private readonly editorService: IEditorService,
 	) {
 		super();
 	}
 
-	async invoke(request: IChatAgentRequest, progress: (parts: IChatProgress[]) => void, _history: IChatAgentHistoryEntry[], token: CancellationToken): Promise<IChatAgentResult> {
-		let messages: any[] = [];
+	async invoke(request: IChatAgentRequest, progress: (parts: IChatProgress[]) => void, history: IChatAgentHistoryEntry[], token: CancellationToken): Promise<IChatAgentResult> {
+		let messages: IChatMessage[] = [];
 		let turnCount = 0;
 		const MAX_TURNS = 10;
 
 		try {
+			// Map history to messages
+			for (const entry of history) {
+				messages.push({ role: 'user', content: entry.request.message });
+				
+				// Response can be multiple parts
+				const assistantContent = entry.response
+					.map((p: IChatProgressHistoryResponseContent | IChatTaskDto) => {
+						if (p.kind === 'markdownContent') {
+						const md = p as IChatProgressHistoryResponseContent & { content: { value: string } };
+						return md.content.value;
+						}
+						if (p.kind === 'progressTask') {
+							return (p as IChatTask).content?.value || '';
+						}
+						return '';
+					})
+					.filter(Boolean)
+					.join('\n');
+				
+				if (assistantContent) {
+					messages.push({ role: 'assistant', content: assistantContent });
+				}
+			}
+
 			const backendUrl = 'http://127.0.0.1:3000/ai/query';
 			let prompt = request.message;
 
 			while (turnCount < MAX_TURNS && !token.isCancellationRequested) {
+				if (turnCount === 0) {
+					const activeEditor = this.editorService.activeEditor;
+					const workspace = this.workspaceContextService.getWorkspace();
+					const workspaceRoot = workspace.folders[0]?.uri;
+					const workspaceName = workspace.folders[0]?.name || 'root';
+
+					let context = `[Context: Workspace Root is ${workspaceName}]`;
+					if (activeEditor?.resource && workspaceRoot) {
+						const relPath = relativePath(workspaceRoot, activeEditor.resource) || activeEditor.resource.fsPath;
+						context += ` [Active File: ${relPath}]`;
+					}
+					prompt = `${context}\n${prompt}`;
+				}
 				turnCount++;
 
 				// Detect slash commands
@@ -91,8 +164,15 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 					return {};
 				}
 
+				// CRITICAL FIX: Always add current user message to messages array.
+				// Previously: if messages.length > 0, prompt was sent as undefined → one-turn lag bug.
+				// Now: current prompt is always the LAST user message in the array.
+				if (turnCount === 1) {
+					// Only add on the first agentic turn (turnCount was just incremented above)
+					messages.push({ role: 'user', content: prompt });
+				}
+
 				const json = await this.aiService.request(backendUrl, {
-					prompt: messages.length === 0 ? prompt : undefined,
 					messages: messages,
 					projectId: 'default_project'
 				}, token);
@@ -109,7 +189,7 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 				}
 
 				// Handle Tool Calls
-				const assistantMessage = { role: 'assistant', tool_calls: tool_calls };
+				const assistantMessage: IChatMessage = { role: 'assistant', tool_calls: tool_calls };
 				messages.push(assistantMessage);
 
 				for (const toolCall of tool_calls) {
@@ -120,34 +200,40 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 
 					let result;
 					try {
-						switch (name) {
-							case 'read_file':
-								result = await this.readFile(args.path);
-								break;
-							case 'write_file':
-								result = await this.writeFile(args.path, args.content);
-								break;
-							case 'semantic_search':
-								result = await this.semanticSearch(args.query, args.k);
-								break;
-							case 'apply_patch':
-								result = await this.applyPatch(args.path, args.patch);
-								break;
-							case 'get_diagnostics':
-								result = await this.getDiagnostics(args.path);
-								break;
-							case 'create_folder':
-								result = await this.createFolder(args.path);
-								break;
-							case 'delete_file':
-								result = await this.deleteFile(args.path);
-								break;
-							case 'list_dir':
-								result = await this.listDir(args.path);
-								break;
-							default:
-								result = `Error: Unknown tool ${name}`;
-						}
+					switch (name) {
+						case 'read_file':
+							result = await this.readFile(args.path);
+							break;
+						case 'write_file':
+							result = await this.writeFile(args.path, args.content, progress);
+							break;
+						case 'semantic_search':
+							result = await this.semanticSearch(args.query, args.k);
+							break;
+						case 'apply_patch':
+							result = await this.applyPatch(args.path, args.patch, progress);
+							break;
+						case 'get_diagnostics':
+							result = await this.getDiagnostics(args.path);
+							break;
+						case 'create_folder':
+							result = await this.createFolder(args.path);
+							break;
+						case 'delete_file':
+							result = await this.deleteFile(args.path);
+							break;
+						case 'list_dir':
+							result = await this.listDir(args.path);
+							break;
+						case 'go_to_definition':
+							result = await this.goToDefinition(args.symbol, args.path);
+							break;
+						case 'run_terminal':
+							result = await this.runTerminal(args.command);
+							break;
+						default:
+							result = `Error: Unknown tool ${name}`;
+					}
 					} catch (err) {
 						result = `Error executing tool: ${err}`;
 					}
@@ -173,23 +259,52 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 
 	private async readFile(relativePath: string): Promise<string> {
 		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
-		if (!workspaceRoot) return 'Error: No workspace root found.';
-
-		const fileUri = workspaceRoot.with({ path: workspaceRoot.path + '/' + relativePath });
+		if (!workspaceRoot) {
+			return 'Error: No workspace root found.';
+		}
+		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
 		const content = await this.fileService.readFile(fileUri);
 		return content.value.toString();
 	}
 
-	private async writeFile(relativePath: string, content: string): Promise<string> {
+	private async writeFile(relativePath: string, content: string, progress?: (parts: IChatProgress[]) => void): Promise<string> {
 		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
-		if (!workspaceRoot) return 'Error: No workspace root found.';
+		if (!workspaceRoot) {
+			return 'Error: No workspace root found.';
+		}
+		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
 
-		const fileUri = workspaceRoot.with({ path: workspaceRoot.path + '/' + relativePath });
+		// Read existing content to compute diff lines for the chat editing UI
+		let existingLines: string[] = [];
+		try {
+			const existing = await this.fileService.readFile(fileUri);
+			existingLines = existing.value.toString().split('\n');
+		} catch {
+			// New file — no existing content
+		}
+
+		// Write to disk
 		await this.fileService.writeFile(fileUri, VSBuffer.fromString(content));
-		return `Successfully updated ${relativePath}`;
+
+		// Emit textEdit progress so VS Code shows Accept/Reject in editor toolbar
+		if (progress) {
+			const newLines = content.split('\n');
+			const endLine = Math.max(existingLines.length, newLines.length);
+			progress([{
+				kind: 'textEdit',
+				uri: fileUri,
+				edits: [{
+					range: { startLineNumber: 1, startColumn: 1, endLineNumber: endLine + 1, endColumn: 1 },
+					text: content
+				}],
+				done: true
+			}]);
+		}
+
+		return `Successfully wrote ${relativePath}`;
 	}
 
-	private async semanticSearch(query: string, k: number = 5): Promise<any> {
+	private async semanticSearch(query: string, k: number = 5): Promise<ISearchResult[]> {
 		const searchUrl = 'http://127.0.0.1:3000/search';
 		try {
 			const json = await this.aiService.request(searchUrl, {
@@ -202,24 +317,54 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 			// Fallback to IDE's in-memory store if backend is unavailable
 			const results = await this.semanticContextService.search(query, CancellationToken.None);
 			return results.slice(0, k).map(r => ({
-				path: r.uri.fsPath,
-				score: r.score,
-				text: r.text.substring(0, 500) + '...'
+				uri: r.uri,
+				range: r.range,
+				text: r.text.substring(0, 500) + '...',
+				score: r.score
 			}));
 		}
 	}
 
-	private async applyPatch(relativePath: string, patch: string): Promise<string> {
-		// Professional simplified patching for the agent
-
-		// In a real production system, this would use a diff library.
-		// For this implementation, we assume the agent provides the new full content or we overwrite safely.
-		// Since 'apply_patch' usually implies partial updates, we fallback to a safe overwrite if the agent provides the content.
-		await this.writeFile(relativePath, patch);
-		return `Successfully applied changes to ${relativePath}`;
+	private async applyPatch(relativePath: string, patch: string, progress?: (parts: IChatProgress[]) => void): Promise<string> {
+		// Try to apply patch as a unified diff. Fallback to full overwrite.
+		try {
+			const original = await this.readFile(relativePath);
+			// Simple line-based patch: find old/new markers and apply surgically
+			// Format expected: lines starting with '-' are removed, '+' are added, ' ' are context
+			const lines = patch.split('\n');
+			const isUnifiedDiff = lines.some(l => l.startsWith('---') || l.startsWith('+++') || l.startsWith('@@'));
+			if (isUnifiedDiff) {
+				// The agent sent a real unified diff - apply using line matching
+				const originalLines = original.split('\n');
+				const result: string[] = [];
+				let i = 0;
+				for (const line of lines) {
+					if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@') || line.startsWith('diff')) {
+						continue; // Skip diff headers
+					} else if (line.startsWith('-')) {
+						i++; // Skip this line in original
+					} else if (line.startsWith('+')) {
+						result.push(line.substring(1)); // Add new line
+					} else {
+						result.push(originalLines[i] ?? line.substring(1));
+						i++;
+					}
+				}
+				await this.writeFile(relativePath, result.join('\n'), progress);
+				return `Applied diff patch to ${relativePath} (${result.length} lines)`;
+			} else {
+				// Agent sent full file content - write it directly
+				await this.writeFile(relativePath, patch, progress);
+				return `Wrote new content to ${relativePath}`;
+			}
+		} catch {
+			// File doesn't exist yet — create it
+			await this.writeFile(relativePath, patch, progress);
+			return `Created and wrote ${relativePath}`;
+		}
 	}
 
-	private async getDiagnostics(relativePath?: string): Promise<any> {
+	private async getDiagnostics(relativePath?: string): Promise<{ file: string; message: string; severity: string; line: number }[]> {
 		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		let filterUri: URI | undefined;
 		if (relativePath && workspaceRoot) {
@@ -237,29 +382,92 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 
 	private async createFolder(relativePath: string): Promise<string> {
 		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
-		if (!workspaceRoot) return 'Error: No workspace root found.';
-		const folderUri = workspaceRoot.with({ path: workspaceRoot.path + '/' + relativePath });
+		if (!workspaceRoot) {
+			return 'Error: No workspace root found.';
+		}
+		const folderUri = joinWorkspacePath(workspaceRoot, relativePath);
 		await this.fileService.createFolder(folderUri);
-		return `Successfully created folder ${relativePath}`;
+		return `Created folder ${relativePath}`;
 	}
 
 	private async deleteFile(relativePath: string): Promise<string> {
 		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
-		if (!workspaceRoot) return 'Error: No workspace root found.';
-		const fileUri = workspaceRoot.with({ path: workspaceRoot.path + '/' + relativePath });
+		if (!workspaceRoot) {
+			return 'Error: No workspace root found.';
+		}
+		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
 		await this.fileService.del(fileUri, { recursive: true });
-		return `Successfully deleted ${relativePath}`;
+		return `Deleted ${relativePath}`;
 	}
 
-	private async listDir(relativePath: string): Promise<any> {
+	private async listDir(relativePath: string): Promise<{ name: string; isDir: boolean; size: number }[]> {
 		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
-		if (!workspaceRoot) return 'Error: No workspace root found.';
-		const dirUri = workspaceRoot.with({ path: workspaceRoot.path + '/' + relativePath });
+		if (!workspaceRoot) {
+			return [];
+		}
+		// Special case: '.' or empty means the workspace root itself
+		const dirUri = (relativePath === '.' || relativePath === '' || relativePath === '/')
+			? workspaceRoot
+			: joinWorkspacePath(workspaceRoot, relativePath);
 		const result = await this.fileService.resolve(dirUri);
 		return result.children?.map(c => ({
 			name: c.name,
 			isDir: c.isDirectory,
-			size: c.size
+			size: c.size || 0
 		})) || [];
+	}
+
+	private async goToDefinition(symbol: string, relativePath: string): Promise<string> {
+		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		if (!workspaceRoot) {
+			return 'Error: No workspace root found.';
+		}
+
+		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
+		const content = await this.readFile(relativePath);
+		const lines = content.split('\n');
+
+		let position: Position | undefined;
+		for (let i = 0; i < lines.length; i++) {
+			const col = lines[i].indexOf(symbol);
+			if (col !== -1) {
+				position = new Position(i + 1, col + 1);
+				break;
+			}
+		}
+
+		if (!position) {
+			return `Error: Could not find symbol "${symbol}" in ${relativePath}`;
+		}
+
+		const model = this.modelService.getModel(fileUri);
+		if (!model) {
+			return `Error: Could not load model for ${relativePath}`;
+		}
+
+		const definitions = await getDefinitionsAtPosition(this.languageFeaturesService.definitionProvider, model, position, false, CancellationToken.None);
+		if (definitions.length === 0) {
+			return `No definitions found for ${symbol}`;
+		}
+
+		const results = definitions.map(d => {
+			const range = Range.lift(d.range);
+			return `${d.uri.fsPath}:${range.startLineNumber}:${range.startColumn}`;
+		});
+
+		return `Found ${definitions.length} definitions:\n${results.join('\n')}`;
+	}
+
+	private async runTerminal(command: string): Promise<string> {
+		// Delegate terminal execution to the backend server which runs in Node.js
+		try {
+			const json = await this.aiService.request('http://127.0.0.1:3000/terminal/run', {
+				command
+			}, CancellationToken.None) as { stdout: string; stderr: string; exitCode: number };
+			const output = [json.stdout, json.stderr].filter(Boolean).join('\n');
+			return `Exit code: ${json.exitCode}\n${output || '(no output)'}`;
+		} catch (err) {
+			return `Terminal tool not yet connected to backend. Command requested: ${command}\nError: ${err}`;
+		}
 	}
 }

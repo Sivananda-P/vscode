@@ -9,6 +9,10 @@ import dotenv from 'dotenv';
 import { AiService } from './services/ai.service';
 import { VectorService } from './services/vector.service';
 import { AstService } from './services/ast.service';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 dotenv.config();
 
@@ -33,35 +37,34 @@ app.post('/ai/query', async (req: Request, res: Response) => {
 	}
 
 	try {
-		let messages = clientMessages || [];
+		// The frontend (customAgent.ts) now always sends a complete messages array
+		// with the current user message already appended as the LAST item.
+		// We just need to ensure the system prompt is at the front.
+		const messages: any[] = clientMessages || [];
 
-		// If it's a new request (no history), prepare the initial prompt
-		if (messages.length === 0 && prompt) {
-			// 1. Embed query (for initial context)
-			console.log(`[AI] Generating query embedding for: ${prompt.substring(0, 50)}...`);
-			const queryVector = await AiService.generateEmbeddings(prompt);
-
-			// 2. Vector Search
-			console.log(`[Vector] Searching LanceDB for project: ${projectId}...`);
-			const contextResults = await VectorService.search(projectId, queryVector as number[]);
-			const contextText = contextResults.map((r: any) => r.text).join('\n\n---\n\n');
-
-			messages = [
-				{
-					role: 'system',
-					content: 'You are a professional AI Assistant with tools to read/write files and perform semantic searches. ' +
-						'Analyze the initial context provided below to answer the user\'s query. ' +
-						`\n\nInitial Context:\n${contextText}`
-				},
-				{ role: 'user', content: prompt }
-			];
+		// Inject system prompt if missing (first turn or fallback)
+		const hasSystemMessage = messages.some(m => m.role === 'system');
+		if (!hasSystemMessage) {
+			messages.unshift({
+				role: 'system',
+				content: 'You are CogniAI, an autonomous senior software engineer. Execute tasks immediately using tools. Never say "I cannot" — always use tools to find and fix the issue.'
+			});
 		}
 
-		// 3. Generate response with context
-		console.log(`[AI] Processing ${messages.length} messages...`);
-		const { response, tool_calls } = await AiService.generateResponse(messages);
+		// Safety: validate we have at least one user message
+		const hasUserMessage = messages.some(m => m.role === 'user');
+		if (!hasUserMessage) {
+			return res.status(400).json({ error: 'No user message in messages array.' });
+		}
 
+		// Log last user message for debugging
+		const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+		console.log(`[AI] Processing request. Last user msg: "${String(lastUserMsg?.content || '').substring(0, 80)}..."`);
+		console.log(`[AI] Total messages: ${messages.length}`);
+
+		const { response, tool_calls } = await AiService.generateResponse(messages);
 		res.json({ response, tool_calls });
+
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
 		console.error('AI Query Error:', message);
@@ -146,6 +149,37 @@ app.post('/search', async (req: Request, res: Response) => {
 		const message = err instanceof Error ? err.message : String(err);
 		console.error('Search Error:', message);
 		res.status(500).json({ error: message });
+	}
+});
+
+app.post('/terminal/run', async (req: Request, res: Response) => {
+	const { command, cwd } = req.body;
+
+	if (!command || typeof command !== 'string') {
+		return res.status(400).json({ error: 'Missing or invalid "command"' });
+	}
+
+	// Sanitize: disallow dangerous commands in production
+	const blocked = ['rm -rf /', 'format', 'del /f /s /q C:\\'];
+	if (blocked.some(b => command.includes(b))) {
+		return res.status(403).json({ error: 'Command blocked for safety.' });
+	}
+
+	try {
+		console.log(`[Terminal] Running: ${command}`);
+		const { stdout, stderr } = await execAsync(command, {
+			cwd: cwd || process.cwd(),
+			timeout: 30000,
+			maxBuffer: 1024 * 1024 * 5 // 5MB
+		});
+		res.json({ stdout, stderr, exitCode: 0 });
+	} catch (err: unknown) {
+		const e = err as { stdout?: string; stderr?: string; code?: number; message?: string };
+		res.json({
+			stdout: e.stdout || '',
+			stderr: e.stderr || e.message || String(err),
+			exitCode: e.code || 1
+		});
 	}
 });
 
