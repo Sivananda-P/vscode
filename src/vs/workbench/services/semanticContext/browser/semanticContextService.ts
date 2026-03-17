@@ -34,7 +34,7 @@ import { DEFAULT_CODE_FILE_PATTERNS, buildExcludePatterns } from '../common/sear
 export class SemanticContextService extends Disposable implements ISemanticContextService {
 	declare readonly _serviceBrand: undefined;
 
-	// ── Status ───────────────────────────────────────────────────────────────
+	// -- Status ---------------------------------------------------------------
 	private readonly _onDidChangeStatus = this._register(new Emitter<SemanticIndexStatus>());
 	readonly onDidChangeStatus: Event<SemanticIndexStatus> = this._onDidChangeStatus.event;
 
@@ -48,14 +48,13 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 	}
 
 	get isAvailable(): boolean {
-		// eslint-disable-next-line local/code-no-any-casts
-		return (this.vectorStore as any).backendAvailable ?? true;
+		return this.vectorStore.isAvailable ?? true;
 	}
 
 	private readonly _onDidIndexProgress = this._register(new Emitter<IIndexProgress>());
 	readonly onDidIndexProgress: Event<IIndexProgress> = this._onDidIndexProgress.event;
 
-	// ── Core components ───────────────────────────────────────────────────────
+	// -- Core components -------------------------------------------------------
 	private readonly indexer: SemanticIndexer;
 	private readonly dependencyGraph: DependencyGraph;
 
@@ -64,7 +63,7 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 	private readonly cursorExtractor: CursorContextExtractor;
 	private readonly promptAssembler: PromptAssembler;
 
-	// ── Telemetry ─────────────────────────────────────────────────────────────
+	// -- Telemetry -------------------------------------------------------------
 	private filesIndexed = 0;
 	private chunksCreated = 0;
 
@@ -111,7 +110,7 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		}));
 	}
 
-	// ── VectorStore lazy init ─────────────────────────────────────────────────
+	// -- VectorStore lazy init -------------------------------------------------
 
 	private async ensureVectorStore(): Promise<IVectorStoreService> {
 		if (!this._retriever) {
@@ -134,7 +133,7 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		return this._retriever;
 	}
 
-	// ── Workspace Indexing ────────────────────────────────────────────────────
+	// -- Workspace Indexing ----------------------------------------------------
 
 	async indexWorkspace(token: CancellationToken): Promise<void> {
 		this.setStatus('building');
@@ -196,7 +195,7 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		}
 	}
 
-	// ── Re-indexing ───────────────────────────────────────────────────────────
+	// -- Re-indexing -----------------------------------------------------------
 
 	/** Re-index a single file (called by IndexWatcher and on initial index). */
 	async reindexFile(uri: URI, skipIndexUpdate = false, mtimesMap?: Map<string, number>): Promise<void> {
@@ -284,14 +283,14 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		}
 	}
 
-	// ── Search ────────────────────────────────────────────────────────────────
+	// -- Search ----------------------------------------------------------------
 
 	async search(query: string, token: CancellationToken): Promise<ISearchResult[]> {
 		const store = await this.ensureVectorStore();
 		return store.searchByText(query, 10);
 	}
 
-	// ── Layered Context ───────────────────────────────────────────────────────
+	// -- Layered Context -------------------------------------------------------
 
 	async getLayeredContext(uri: URI, position: IPosition, prompt: string, token: CancellationToken, onProgress?: (result: ILayeredContext) => void): Promise<ILayeredContext> {
 		await this.ensureVectorStore();
@@ -361,7 +360,7 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		return ctx.assembledPrompt;
 	}
 
-	// ── Telemetry / Debug  ────────────────────────────────────────────────────
+	//---- Telemetry / Debug  -------------------
 
 	getMetrics() {
 		return {
@@ -373,7 +372,7 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		};
 	}
 
-	// ── Helpers ───────────────────────────────────────────────────────────────
+	// -- Helpers ---------------------------------------------------------------
 
 	private isSupportedFile(uri: URI): boolean {
 		const ext = uri.path.split('.').pop()?.toLowerCase();

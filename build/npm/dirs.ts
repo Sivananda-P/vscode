@@ -37,6 +37,7 @@ export const dirs = [
 	'extensions/media-preview',
 	'extensions/merge-conflict',
 	'extensions/mermaid-chat-features',
+	'extensions/cogni-autocomplete',
 	'extensions/microsoft-authentication',
 	'extensions/notebook-renderers',
 	'extensions/npm',

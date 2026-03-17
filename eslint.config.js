@@ -12,7 +12,7 @@ import * as pluginLocal from './.eslint-plugin-local/index.ts';
 import pluginJsdoc from 'eslint-plugin-jsdoc';
 
 import pluginHeader from 'eslint-plugin-header';
-pluginHeader.rules.header.meta.schema = false;
+/** @type {any} */(pluginHeader).rules.header.meta.schema = false;
 
 const ignores = fs.readFileSync(path.join(import.meta.dirname, '.eslint-ignore'), 'utf8')
 	.toString()
@@ -2200,6 +2200,7 @@ export default tseslint.config(
 			'extensions/media-preview/src/**/*.ts',
 			'extensions/simple-browser/**/*.ts',
 			'extensions/typescript-language-features/**/*.ts',
+			'extensions/cogni-autocomplete/src/**/*.ts',
 		],
 		languageOptions: {
 			parser: tseslint.parser,
@@ -2220,6 +2221,9 @@ export default tseslint.config(
 					// Mermaid chat features
 					'extensions/mermaid-chat-features/tsconfig.json',
 					'extensions/mermaid-chat-features/chat-webview-src/tsconfig.json',
+
+					// CogniAI Autocomplete
+					'extensions/cogni-autocomplete/tsconfig.json',
 
 					// TypeScript
 					'extensions/typescript-language-features/tsconfig.json',

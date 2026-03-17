@@ -8,6 +8,7 @@ import * as ts from 'typescript';
 export interface ICodeChunk {
 	text: string;
 	metadata: {
+		id: string;
 		uri: string;
 		range: {
 			startLineNumber: number;
@@ -51,6 +52,7 @@ export class AstService {
 					chunks.push({
 						text: node.getText(sourceFile),
 						metadata: {
+							id: `${uri}#${range.startLineNumber}-${range.endLineNumber}`,
 							uri,
 							range,
 							symbolName,
@@ -93,6 +95,7 @@ export class AstService {
 			chunks.push({
 				text: chunkText,
 				metadata: {
+					id: `${uri}#fallback-${i}`,
 					uri,
 					range: {
 						startLineNumber: i + 1,

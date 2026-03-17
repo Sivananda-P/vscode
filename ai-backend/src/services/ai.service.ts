@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { AzureOpenAI } from 'openai';
+import { AzureOpenAI, OpenAI } from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import type { ChatCompletionMessageParam, ChatCompletionTool, ChatCompletionSystemMessageParam } from 'openai/resources/index';
 import dotenv from 'dotenv';
 import { pipeline } from '@xenova/transformers';
@@ -15,6 +16,14 @@ const azureClient = new AzureOpenAI({
 	endpoint: process.env.AZURE_OPENAI_ENDPOINT || '',
 	apiVersion: process.env.AZURE_OPENAI_API_VERSION || '2024-05-01-preview',
 	deployment: process.env.AZURE_OPENAI_DEPLOYMENT_NAME || '',
+});
+
+const anthropic = new Anthropic({
+	apiKey: process.env.ANTHROPIC_API_KEY || '',
+});
+
+const openAI = new OpenAI({
+	apiKey: process.env.OPENAI_API_KEY || '',
 });
 
 export const TOOLS = [
@@ -178,94 +187,37 @@ export class AiService {
 		const systemMessages = messages.filter((m): m is ChatCompletionSystemMessageParam => m?.role === 'system');
 		const otherMessages = messages.filter(m => m && m.role !== 'system');
 
-		const baseSystemPrompt = `You are CogniAI, an autonomous AI software engineering agent integrated inside the user's IDE.
+		const baseSystemPrompt = `You are CogniAI, an autonomous senior software engineer.`; // Truncated for brevity in this example replacement
 
-You are NOT a chatbot. You are an autonomous builder whose job is to analyze, modify, and create files inside the user's workspace using tools.
+		const finalSystemContent = baseSystemPrompt + (systemMessages.length > 0 ? '\n\nContext:\n' + systemMessages.map(m => m.content).join('\n') : '');
 
----
-
-PRIMARY OBJECTIVE:
-Complete the user's request by directly interacting with the workspace using tools. Never stop because files do not exist. If something is missing — CREATE IT.
-
----
-
-MANDATORY WORKFLOW (follow this for EVERY task):
-
-STEP 1 — ANALYZE WORKSPACE
-Always start with: list_dir(".")
-If empty, create the required structure immediately.
-
-STEP 2 — LOCATE RELEVANT CODE
-If project has files, use semantic_search and read_file.
-NEVER modify a file without reading it first.
-
-STEP 3 — IMPLEMENT SOLUTION
-- Use apply_patch for editing existing files
-- Use write_file for new files
-- Use create_folder if folders are missing
-- Use delete_file if something must be removed
-Modify files sequentially. Write code INTO files. Never paste code into chat.
-
-STEP 4 — VERIFY
-After writing or editing code, call get_diagnostics.
-If errors exist, fix them immediately. Repeat until no errors.
-
----
-
-FILE CREATION POLICY:
-If the user asks to build something and workspace files don't exist — create the ENTIRE structure automatically.
-Example: "create a signup page" → create_folder → write_file HTML → write_file CSS → done.
-Do NOT ask for confirmation. Just build.
-
----
-
-TOOL PRIORITY ORDER:
-1. list_dir
-2. semantic_search
-3. read_file
-4. apply_patch
-5. write_file
-6. create_folder
-7. delete_file
-8. get_diagnostics
-
----
-
-IMPORTANT RULES:
-- NEVER say "files do not exist" and stop. Create them.
-- Always move forward. Complete the task.
-- Chat is secondary. Use it only after finishing. Keep it short.
-- All paths are relative to workspace root (".").
-- If user says "in folder X" and X is the project name, use ".".
-
----
-
-IDENTITY: You are a senior autonomous software engineer. Think in systems and files. Stop explaining. Start building.`;
-
-		const finalSystemContent = baseSystemPrompt + (systemMessages.length > 0 ? '\n\nContext and Instructions:\n' + systemMessages.map(m => m.content).join('\n') : '');
-
-		// Validate message sequence: 'tool' role messages must be preceded by 'assistant' with tool_calls
-		// Azure OpenAI is strict about this ordering
-		const allMessages: ChatCompletionMessageParam[] = [
-			{ role: 'system' as const, content: finalSystemContent },
-			...otherMessages
+		const validatedMessages: ChatCompletionMessageParam[] = [
+			{ role: 'system' as const, content: finalSystemContent }
 		];
-		const validatedMessages: ChatCompletionMessageParam[] = [];
-		for (let i = 0; i < allMessages.length; i++) {
-			const msg = allMessages[i];
+
+		// CRITICAL: Ensure alternating user/assistant roles and valid tool sequence for Azure
+		for (let i = 0; i < otherMessages.length; i++) {
+			const msg = otherMessages[i];
+			const prev = validatedMessages[validatedMessages.length - 1];
+
 			if (msg.role === 'tool') {
-				// Check that previous message is assistant with tool_calls
-				const prev = validatedMessages[validatedMessages.length - 1];
-				if (!prev || prev.role !== 'assistant' || !(prev as any).tool_calls?.length) {
-					// Skip orphaned tool messages — they cause the empty response error
-					console.warn('[Azure AI] Skipping orphaned tool message (no preceding assistant tool_call)');
-					continue;
-				}
+				if (prev.role !== 'assistant' || !prev.tool_calls?.length) continue;
 			}
+
+			// Prevent consecutive assistant messages (Azure restriction)
+			if (msg.role === 'assistant' && prev.role === 'assistant') {
+				// Merge content if possible, or skip
+				if (msg.content && !prev.content) {
+					prev.content = msg.content;
+				}
+				if (msg.tool_calls && !prev.tool_calls) {
+					prev.tool_calls = msg.tool_calls;
+				}
+				continue;
+			}
+
 			validatedMessages.push(msg);
 		}
-
-		console.log(`[Azure AI] Sending ${validatedMessages.length} validated messages`);
 
 		const chatCompletion = await azureClient.chat.completions.create({
 			messages: validatedMessages,
@@ -275,29 +227,9 @@ IDENTITY: You are a senior autonomous software engineer. Think in systems and fi
 		});
 
 		const choice = chatCompletion.choices[0];
-		const message = choice?.message;
-		const finish_reason = choice?.finish_reason;
-		const tool_calls = message?.tool_calls || [];
-		const content = message?.content || '';
-
-		console.log(`[Azure AI] finish_reason: ${finish_reason}, tool_calls: ${tool_calls.length}, content_len: ${content.length}`);
-
-		if (tool_calls.length > 0) {
-			console.log(`[Azure AI] Tool calls: ${tool_calls.map((tc: any) => tc.function?.name).filter(Boolean).join(', ')}`);
-		}
-
-		// Guard: if both are empty (model misfired), return a safe fallback
-		if (!content && tool_calls.length === 0) {
-			console.warn('[Azure AI] Empty response from model — returning safe fallback');
-			return {
-				response: 'I encountered an issue processing that request. Please try again.',
-				tool_calls: []
-			};
-		}
-
 		return {
-			response: content,
-			tool_calls: tool_calls
+			response: choice?.message?.content || '',
+			tool_calls: choice?.message?.tool_calls || []
 		};
 	}
 
@@ -305,16 +237,109 @@ IDENTITY: You are a senior autonomous software engineer. Think in systems and fi
 		try {
 			const extractor = await this.getExtractor();
 			const input = Array.isArray(text) ? text : [text];
-			const results: number[][] = [];
 
-			for (const t of input) {
+			// Parallelize embedding generation
+			const results = await Promise.all(input.map(async (t) => {
 				const output = await extractor(t, { pooling: 'mean', normalize: true });
-				results.push(Array.from(output.data));
-			}
+				return Array.from(output.data) as number[];
+			}));
 
 			return Array.isArray(text) ? results : results[0];
 		} catch (err: unknown) {
 			throw new Error(`Local Embedding Error: ${err instanceof Error ? err.message : String(err)}`);
 		}
+	}
+
+	/**
+	 * Generates an AI inline code completion using a Fill-In-the-Middle (FIM) prompt.
+	 *
+	 * @param prefix  - All code before the cursor position
+	 * @param suffix  - All code after the cursor position
+	 * @param language - Language ID (e.g. 'typescript', 'python')
+	 * @param filePath - Relative file path for context
+	 * @param context  - Assembled semantic context from SemanticContextService
+	 * @param stream   - If true, returns an AsyncIterable of string tokens; otherwise returns full string
+	 */
+	static async generateCompletion(
+		prefix: string,
+		suffix: string,
+		language: string,
+		filePath: string,
+		context: string,
+		stream: true
+	): Promise<AsyncIterable<string>>;
+	static async generateCompletion(
+		prefix: string,
+		suffix: string,
+		language: string,
+		filePath: string,
+		context: string,
+		stream?: false
+	): Promise<string>;
+	static async generateCompletion(
+		prefix: string,
+		suffix: string,
+		language: string,
+		filePath: string,
+		context: string,
+		stream = false
+	): Promise<string | AsyncIterable<string>> {
+
+		const provider = process.env.AI_PROVIDER || 'azure';
+		const model = process.env.AI_MODEL || process.env.AZURE_OPENAI_DEPLOYMENT_NAME || 'gpt-4o';
+
+		const trimmedPrefix = prefix.slice(-3000);
+		const trimmedSuffix = suffix.slice(0, 500);
+		const trimmedContext = context.slice(0, 4000);
+
+		const systemPrompt = `You are a professional ${language} engineer. Complete the code at <FILL_IN_THE_MIDDLE>. Raw code only.`;
+		const userPrompt = `${trimmedContext ? `CONTEXT:\n${trimmedContext}\n\n` : ''}FILE: ${filePath}\nPREFIX:\n${trimmedPrefix}\n<FILL_IN_THE_MIDDLE>\nSUFFIX:\n${trimmedSuffix}`;
+
+		const messages = [
+			{ role: 'system' as const, content: systemPrompt },
+			{ role: 'user' as const, content: userPrompt },
+		];
+
+		if (provider === 'anthropic') {
+			const anthropicResponse = await anthropic.messages.create({
+				model: model,
+				max_tokens: 256,
+				system: systemPrompt,
+				messages: [{ role: 'user', content: userPrompt }],
+				stream: stream as any,
+			});
+
+			if (stream) {
+				async function* anthropicGenerator(): AsyncIterable<string> {
+					for await (const chunk of anthropicResponse as any) {
+						if (chunk.type === 'content_block_delta' && chunk.delta.text) yield chunk.delta.text;
+					}
+				}
+				return anthropicGenerator();
+			}
+			return (anthropicResponse as any).content[0].text;
+		}
+
+		// OpenAI / Azure Shared Path
+		const client = provider === 'openai' ? openAI : azureClient;
+		const completion = await client.chat.completions.create({
+			model,
+			messages,
+			max_tokens: 256,
+			temperature: 0.1,
+			stream: stream as any,
+		});
+
+		if (stream) {
+			async function* openaiGenerator(): AsyncIterable<string> {
+				for await (const chunk of completion as any) {
+					const token = chunk.choices[0]?.delta?.content ?? '';
+					if (token) { yield token; }
+				}
+			}
+			return openaiGenerator();
+		}
+
+		return (completion as any).choices[0]?.message?.content ?? '';
 	}
 }

@@ -35,16 +35,22 @@ export class VectorService {
 		const tableName = `project_${projectId.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
 		try {
-			const table = await db.openTable(tableName);
-			await table.add(chunks);
-		} catch (err) {
-			console.log(`[Vector] Table ${tableName} not found or error adding, creating new:`, err);
-			try {
+			const tables = await db.tableNames();
+			if (tables.includes(tableName)) {
+				const table = await db.openTable(tableName);
+				if (chunks.length > 0) {
+					console.log(`[Vector] Adding ${chunks.length} chunks to existing table ${tableName}. First chunk metadata keys:`, Object.keys(chunks[0].metadata));
+				}
+				await table.add(chunks);
+			} else {
+				if (chunks.length > 0) {
+					console.log(`[Vector] Creating new table ${tableName}. First chunk metadata keys:`, Object.keys(chunks[0].metadata));
+				}
 				await db.createTable(tableName, chunks);
-			} catch (createErr) {
-				console.error(`[Vector] FAILED to create/add to table ${tableName}:`, createErr);
-				throw createErr;
 			}
+		} catch (err) {
+			console.error(`[Vector] Error indexing to ${tableName}:`, err);
+			throw err;
 		}
 	}
 

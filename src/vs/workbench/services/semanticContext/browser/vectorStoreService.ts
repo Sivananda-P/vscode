@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IVectorStoreService, ISearchResult } from '../common/vectorStore.js';
+import { IVectorStoreService, ISearchResult, IRange } from '../common/vectorStore.js';
 import { ICodeChunk } from '../common/semanticIndexer.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IAIService } from '../../../../platform/ai/common/ai.js';
@@ -20,6 +20,7 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 	declare readonly _serviceBrand: undefined;
 
 	private backendAvailable = true;
+	get isAvailable() { return this.backendAvailable; }
 	private lastCheckTime = 0;
 	private readonly CHECK_INTERVAL = 30000; // 30 seconds
 
@@ -142,7 +143,7 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 				projectId: 'default_project',
 				query,
 				k: limit
-			}, CancellationToken.None) as { results: any[] };
+			}, CancellationToken.None) as { results: { text: string; score: number; metadata: { uri: string; range: IRange; symbolName?: string; symbolType?: string } }[] };
 
 			return response.results.map(r => ({
 				uri: URI.parse(r.metadata.uri),

@@ -14,6 +14,7 @@ import { INativeEmbeddingService } from '../common/nativeEmbeddingService.js';
 import { NativeEmbeddingServiceClient } from './nativeEmbeddingService.js';
 
 import { ILogService } from '../../../../platform/log/common/log.js';
+import { ICodeEditor, isCodeEditor } from '../../../../editor/browser/editorBrowser.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { IProgressService, ProgressLocation, IProgress, IProgressStep } from '../../../../platform/progress/common/progress.js';
 import { IStatusbarService, StatusbarAlignment, IStatusbarEntryAccessor } from '../../../services/statusbar/browser/statusbar.js';
@@ -28,15 +29,18 @@ import { LifecyclePhase } from '../../lifecycle/common/lifecycle.js';
 import { registerAction2, Action2 } from '../../../../platform/actions/common/actions.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { localize } from '../../../../nls.js';
+import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
+import { URI } from '../../../../base/common/uri.js';
 
-// ── Register Services ──────────────────────────────────────────────────────────
+
+// -- Register Services ----------------------------------------------------------
 registerSingleton(IEmbeddingProvider, GroqEmbeddingProvider, InstantiationType.Delayed);
 registerSingleton(IVectorStoreService, VectorStoreServiceClient, InstantiationType.Delayed);
 registerSingleton(INativeEmbeddingService, NativeEmbeddingServiceClient, InstantiationType.Delayed);
 registerSingleton(ISemanticContextService, SemanticContextService, InstantiationType.Delayed);
 
 
-// ── Output Channel ─────────────────────────────────────────────────────────────
+// -- Output Channel -------------------------------------------------------------
 const SEMANTIC_OUTPUT_CHANNEL = 'Semantic Context Engine';
 Registry.as<IOutputChannelRegistry>(OutputExt.OutputChannels).registerChannel({
 	id: 'semanticContextEngine',
@@ -44,8 +48,8 @@ Registry.as<IOutputChannelRegistry>(OutputExt.OutputChannels).registerChannel({
 	log: false
 });
 
-// ── Status Bar Contribution ───────────────────────────────────────────────────────
-// ── Status Bar Contribution ───────────────────────────────────────────────────────
+// -- Status Bar Contribution -------------------------------------------------------
+// -- Status Bar Contribution -------------------------------------------------------
 
 class SemanticStatusBarContribution extends Disposable {
 	private item: IStatusbarEntryAccessor | undefined;
@@ -102,7 +106,6 @@ class SemanticStatusBarContribution extends Disposable {
 		}
 		let text = '';
 		let tooltip = '';
-		let backgroundColor: { id: string } | undefined = undefined;
 
 		switch (status) {
 			case 'building': {
@@ -140,7 +143,7 @@ class SemanticStatusBarContribution extends Disposable {
 			tooltip,
 			ariaLabel: text,
 			command: 'semantic.debugContext',
-			backgroundColor
+			backgroundColor: undefined
 		});
 	}
 
@@ -152,10 +155,10 @@ class SemanticStatusBarContribution extends Disposable {
 	}
 }
 
-// ── Register Workbench Contribution ──────────────────────────────────────────
+// -- Register Workbench Contribution ------------------------------------------
 Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(SemanticStatusBarContribution, LifecyclePhase.Eventually);
 
-// ── Actions ───────────────────────────────────────────────────────────────────
+// -- Actions -------------------------------------------------------------------
 
 registerAction2(class extends Action2 {
 	constructor() {
@@ -203,26 +206,28 @@ registerAction2(class extends Action2 {
 		const editor = editorService.activeTextEditorControl;
 		const channel = outputService.getChannel('semanticContextEngine');
 
-		if (!editor || !('getModel' in editor)) {
+		if (!isCodeEditor(editor)) {
 			logService.warn('semantic.debugContext: no active text editor');
 			if (channel) {
 				channel.clear();
 				channel.append('=== Semantic Context Debug ===\n');
 				channel.append('Status: ' + semanticService.status + '\n\n');
-				channel.append('⚠️ No active text editor found.\n');
+				channel.append('!! No active text editor found.\n');
 				channel.append('Please open a code file and click the button again to see the semantic context for that file.\n');
 				outputService.showChannel('semanticContextEngine');
 			}
 			return;
 		}
 
-		// eslint-disable-next-line local/code-no-any-casts
-		const model = (editor as any).getModel();
-		// eslint-disable-next-line local/code-no-any-casts
-		const position = (editor as any).getPosition();
-		if (!model || !position || !model.uri) return;
+		const model = (editor as ICodeEditor).getModel();
+		const position = (editor as ICodeEditor).getPosition();
+		if (!model || !position || !model.uri) {
+			return;
+		}
 
-		if (!channel) return;
+		if (!channel) {
+			return;
+		}
 
 		channel.clear();
 		channel.append(`=== Semantic Context Debug ===\n`);
@@ -281,10 +286,14 @@ registerAction2(class extends Action2 {
 			placeHolder: localize('searchPlaceholder', 'Search your codebase semantically…'),
 			prompt: localize('searchPrompt', 'Enter a natural-language query (e.g. "authentication middleware", "parse JSON config")')
 		});
-		if (!query) return;
+		if (!query) {
+			return;
+		}
 
 		const channel = outputService.getChannel('semanticContextEngine');
-		if (!channel) return;
+		if (!channel) {
+			return;
+		}
 
 		channel.clear();
 		channel.append(`=== Semantic Search ===\n`);
@@ -300,7 +309,7 @@ registerAction2(class extends Action2 {
 				channel.append(`\nNo results found. Try reindexing with "Semantic: Reindex Workspace".\n`);
 			} else {
 				channel.append(`\nFound ${results.length} result(s):\n`);
-				channel.append(`${'─'.repeat(60)}\n`);
+				channel.append(`${'-'.repeat(60)}\n`);
 				for (let i = 0; i < results.length; i++) {
 					const r = results[i];
 					const label = r.symbolName ? `${r.symbolName} (${r.symbolType ?? 'chunk'})` : r.uri.fsPath;
@@ -313,7 +322,7 @@ registerAction2(class extends Action2 {
 						channel.append(`    ${preview}\n`);
 					}
 				}
-				channel.append(`\n${'─'.repeat(60)}\n`);
+				channel.append(`\n${'-'.repeat(60)}\n`);
 			}
 		} catch (err) {
 			logService.error(`semantic.search failed: ${err}`);
@@ -325,3 +334,80 @@ registerAction2(class extends Action2 {
 		logService.info(`semantic.search: query="${query}" done`);
 	}
 });
+
+// -- cogni.getContext - Extension Bridge Command ------------------------------
+//
+// This command allows the cogni-autocomplete extension (and any future
+// extension) to request layered semantic context from the IDE's internal
+// SemanticContextService without needing direct service injection.
+//
+// Usage from an extension:
+//   const ctx = await vscode.commands.executeCommand(
+//     'cogni.getContext',
+//     document.uri,
+//     { lineNumber: position.line + 1, column: position.character + 1 }
+//   );
+//   // ctx.assembledPrompt  — full structured prompt string
+//   // ctx.cursorContext    — surrounding code, symbol, imports
+//   // ctx.semanticMatches  — top-K relevant chunks from vector DB
+//
+CommandsRegistry.registerCommand(
+	'cogni.getContext',
+	async (
+		accessor: ServicesAccessor,
+		uri: URI,
+		position: { lineNumber: number; column: number }
+	) => {
+		const semanticService = accessor.get(ISemanticContextService);
+		const logService = accessor.get(ILogService);
+
+		if (!uri || !position) {
+			logService.warn('[cogni.getContext] Called without uri or position');
+			return null;
+		}
+
+		try {
+			const ctx = await semanticService.getLayeredContext(
+				uri,
+				{ lineNumber: position.lineNumber, column: position.column },
+				'inline completion context',
+				CancellationToken.None
+			);
+
+			// Return a serializable subset of the layered context
+			// (URI objects are converted to strings for cross-boundary safety)
+			return {
+				assembledPrompt: ctx.assembledPrompt,
+				tokenEstimate: ctx.tokenEstimate,
+				isFinal: ctx.isFinal,
+				cursorContext: {
+					surroundingLines: ctx.cursorContext.surroundingLines,
+					importStatements: ctx.cursorContext.importStatements,
+					currentSymbol: ctx.cursorContext.currentSymbol
+						? {
+							name: ctx.cursorContext.currentSymbol.name,
+							kind: ctx.cursorContext.currentSymbol.kind,
+							text: ctx.cursorContext.currentSymbol.text,
+						}
+						: undefined,
+					enclosingSymbol: ctx.cursorContext.enclosingSymbol
+						? {
+							name: ctx.cursorContext.enclosingSymbol.name,
+							kind: ctx.cursorContext.enclosingSymbol.kind,
+						}
+						: undefined,
+				},
+				semanticMatches: ctx.semanticMatches.slice(0, 5).map(m => ({
+					text: m.text,
+					score: m.score,
+					symbolName: m.symbolName,
+					symbolType: m.symbolType,
+					uri: m.uri.toString(),
+				})),
+			};
+		} catch (err) {
+			logService.error(`[cogni.getContext] Failed: ${err}`);
+			return null;
+		}
+	}
+);

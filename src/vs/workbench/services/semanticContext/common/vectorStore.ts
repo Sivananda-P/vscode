@@ -35,5 +35,6 @@ export interface IVectorStoreService {
 	/** Search the codebase semantically using a text query. */
 	searchByText(query: string, limit?: number): Promise<ISearchResult[]>;
 	getFileMtimes(): Promise<[string, number][]>;
+	readonly isAvailable?: boolean;
 	close(): Promise<void>;
 }

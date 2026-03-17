@@ -27,6 +27,33 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
+const startTime = Date.now();
+
+// --- Health Check -------------------------------------------------------------
+// Prevents "Cannot GET /" error when the backend URL is opened in a browser.
+app.get('/', (_req: Request, res: Response) => {
+	res.json({
+		name: 'CogniAI Backend',
+		status: 'running OK',
+		uptime: `${Math.floor((Date.now() - startTime) / 1000)}s`,
+		version: '1.0.0',
+		endpoints: {
+			'POST /ai/query': 'CogniAI agent chat (tool-calling loop)',
+			'POST /ai/complete': 'Inline code completion (non-streaming)',
+			'POST /ai/complete/stream': 'Inline code completion (SSE streaming)',
+			'POST /embeddings/index': 'Index code chunks from frontend',
+			'POST /embeddings/index-file': 'Index a file via AST parsing (server-side)',
+			'POST /search': 'Semantic similarity search',
+			'POST /terminal/run': 'Execute shell commands',
+			'GET  /health': 'Alias for this health check',
+		},
+	});
+});
+
+// Alias: GET /health
+app.get('/health', (_req: Request, res: Response) => {
+	res.json({ status: 'ok', uptime: `${Math.floor((Date.now() - startTime) / 1000)}s` });
+});
 
 // --- AI Query Endpoint (RAG) ---
 app.post('/ai/query', async (req: Request, res: Response) => {
@@ -183,6 +210,99 @@ app.post('/terminal/run', async (req: Request, res: Response) => {
 	}
 });
 
+// --- AI Autocomplete Endpoints ------------------------------------------------
+
+/**
+ * POST /ai/complete
+ * Non-streaming inline code completion.
+ * Body: { prefix, suffix, language, filePath, context }
+ * Response: { suggestion: string }
+ */
+app.post('/ai/complete', async (req: Request, res: Response) => {
+	const {
+		prefix = '',
+		suffix = '',
+		language = 'plaintext',
+		filePath = 'unknown',
+		context = ''
+	} = req.body;
+
+	if (typeof prefix !== 'string') {
+		return res.status(400).json({ error: 'prefix must be a string' });
+	}
+
+	try {
+		console.log(`[Autocomplete] Non-stream request | lang=${language} | prefix_len=${prefix.length}`);
+		const suggestion = await AiService.generateCompletion(
+			prefix, suffix, language, filePath, context
+		);
+		console.log(`[Autocomplete] Suggestion len=${suggestion.length}`);
+		res.json({ suggestion });
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.error('[Autocomplete] Error:', message);
+		res.status(500).json({ error: message });
+	}
+});
+
+/**
+ * POST /ai/complete/stream
+ * SSE streaming inline code completion.
+ * Body: { prefix, suffix, language, filePath, context }
+ * Response: Server-Sent Events — data: {"token":"..."}\n\n ... data: [DONE]\n\n
+ */
+app.post('/ai/complete/stream', async (req: Request, res: Response) => {
+	const {
+		prefix = '',
+		suffix = '',
+		language = 'plaintext',
+		filePath = 'unknown',
+		context = ''
+	} = req.body;
+
+	if (typeof prefix !== 'string') {
+		return res.status(400).json({ error: 'prefix must be a string' });
+	}
+
+	// SSE headers
+	res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+	res.setHeader('Cache-Control', 'no-cache, no-transform');
+	res.setHeader('Connection', 'keep-alive');
+	res.setHeader('X-Accel-Buffering', 'no'); // disable nginx proxy buffering
+	res.flushHeaders();
+
+	const sendEvent = (data: string) => {
+		res.write(`data: ${data}\n\n`);
+	};
+
+	try {
+		console.log(`[Autocomplete/Stream] Request | lang=${language} | prefix_len=${prefix.length}`);
+
+		const tokenStream = await AiService.generateCompletion(
+			prefix, suffix, language, filePath, context, true
+		);
+
+		let totalTokens = 0;
+		for await (const token of tokenStream) {
+			sendEvent(JSON.stringify({ token }));
+			totalTokens++;
+		}
+
+		sendEvent('[DONE]');
+		console.log(`[Autocomplete/Stream] Done | tokens_sent=${totalTokens}`);
+		res.end();
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.error('[Autocomplete/Stream] Error:', message);
+		sendEvent(JSON.stringify({ error: message }));
+		sendEvent('[DONE]');
+		res.end();
+	}
+});
+
+// --- Start Server -------------------------------------------------------------
+
 app.listen(PORT, () => {
 	console.log(`AI Backend running on http://localhost:${PORT}`);
 });
+

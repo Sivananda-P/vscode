@@ -1,0 +1,99 @@
+{
+  "name": "cogni-autocomplete",
+  "displayName": "CogniAI Autocomplete",
+  "description": "Copilot-style AI inline code completions powered by CogniAI — semantic-aware, project-context-rich ghost text suggestions.",
+  "version": "1.0.0",
+  "publisher": "vscode",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/microsoft/vscode.git"
+  },
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension",
+  "contributes": {
+    "configuration": {
+      "title": "CogniAI Autocomplete",
+      "properties": {
+        "cogni.autocomplete.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable CogniAI inline code completion (ghost text suggestions).",
+          "scope": "application"
+        },
+        "cogni.autocomplete.debounceMs": {
+          "type": "number",
+          "default": 300,
+          "minimum": 50,
+          "maximum": 2000,
+          "description": "Milliseconds to wait after the last keystroke before requesting a completion.",
+          "scope": "application"
+        },
+        "cogni.autocomplete.backendUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3000",
+          "description": "Base URL of the CogniAI backend server.",
+          "scope": "application"
+        },
+        "cogni.autocomplete.maxTokens": {
+          "type": "number",
+          "default": 256,
+          "minimum": 32,
+          "maximum": 1024,
+          "description": "Maximum number of tokens to generate per completion.",
+          "scope": "application"
+        },
+        "cogni.autocomplete.useStreaming": {
+          "type": "boolean",
+          "default": true,
+          "description": "Stream completions token-by-token for faster perceived response time.",
+          "scope": "application"
+        },
+        "cogni.autocomplete.useSemanticContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include project-wide semantic context (vector search results) in completion prompts.",
+          "scope": "application"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "cogni.autocomplete.toggle",
+        "title": "CogniAI: Toggle Autocomplete",
+        "category": "CogniAI"
+      },
+      {
+        "command": "cogni.autocomplete.triggerManually",
+        "title": "CogniAI: Trigger Inline Suggestion",
+        "category": "CogniAI"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "cogni.autocomplete.triggerManually",
+        "key": "ctrl+shift+space",
+        "mac": "cmd+shift+space",
+        "when": "editorTextFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "gulp compile-extension:cogni-autocomplete",
+    "watch": "gulp watch-extension:cogni-autocomplete",
+    "vscode:prepublish": "npm run build",
+    "build": "node ../../node_modules/gulp/bin/gulp.js --gulpfile ../../build/gulpfile.extensions.mjs compile-extension:cogni-autocomplete"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.10"
+  }
+}
