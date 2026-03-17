@@ -1,0 +1,22 @@
+{
+	"name": "cogniai-skills",
+	"publisher": "vscode",
+	"version": "0.0.1",
+	"engines": {
+		"vscode": "^1.110.0"
+	},
+	"activationEvents": [],
+	"main": "./dist/extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "cogniai.run3dAnim",
+				"title": "CogniAI: 3D Animation Assistant"
+			},
+			{
+				"command": "cogniai.runFrontendDesign",
+				"title": "CogniAI: Frontend Design Assistant"
+			}
+		]
+	}
+}

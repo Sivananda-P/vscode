@@ -9,6 +9,7 @@ import dotenv from 'dotenv';
 import { AiService } from './services/ai.service';
 import { VectorService } from './services/vector.service';
 import { AstService } from './services/ast.service';
+import { SkillService } from './services/skill.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -57,7 +58,7 @@ app.get('/health', (_req: Request, res: Response) => {
 
 // --- AI Query Endpoint (RAG) ---
 app.post('/ai/query', async (req: Request, res: Response) => {
-	const { prompt, projectId = 'default_project', messages: clientMessages } = req.body;
+	const { prompt, projectId = 'default_project', messages: clientMessages, skill } = req.body;
 
 	if (prompt === 'ping') {
 		return res.json({ response: 'pong' });
@@ -87,9 +88,9 @@ app.post('/ai/query', async (req: Request, res: Response) => {
 		// Log last user message for debugging
 		const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
 		console.log(`[AI] Processing request. Last user msg: "${String(lastUserMsg?.content || '').substring(0, 80)}..."`);
-		console.log(`[AI] Total messages: ${messages.length}`);
+		console.log(`[AI] Total messages: ${messages.length}, Skill: ${skill || 'none'}`);
 
-		const { response, tool_calls } = await AiService.generateResponse(messages);
+		const { response, tool_calls } = await AiService.generateResponse(messages, skill);
 		res.json({ response, tool_calls });
 
 	} catch (err: unknown) {

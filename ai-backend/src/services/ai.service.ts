@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { ChatCompletionMessageParam, ChatCompletionTool, ChatCompletionSystemMessageParam } from 'openai/resources/index';
 import dotenv from 'dotenv';
 import { pipeline } from '@xenova/transformers';
+import { SkillService } from './skill.service';
 
 dotenv.config();
 
@@ -184,12 +185,13 @@ export class AiService {
 		return this.extractor;
 	}
 
-	static async generateResponse(messages: ChatCompletionMessageParam[]) {
+	static async generateResponse(messages: ChatCompletionMessageParam[], skillName?: string) {
 		// Consolidate system messages into the first slot
 		const systemMessages = messages.filter((m): m is ChatCompletionSystemMessageParam => m?.role === 'system');
 		const otherMessages = messages.filter(m => m && m.role !== 'system');
 
-		const baseSystemPrompt = `You are CogniAI, a master software architect.
+		const skillPrompt = await SkillService.getSystemPrompt(skillName);
+		const baseSystemPrompt = `You are CogniAI, a master software architect and autonomous senior software engineer.
 RULES FOR CODE INTEGRATION:
 1. NEVER output partial code fragments. Always output complete, valid files if using write_file.
 2. If using apply_patch, ensure the hunk context matches the existing file EXACTLY.
@@ -209,19 +211,23 @@ RULES FOR CODE INTEGRATION:
 			const prev = validatedMessages[validatedMessages.length - 1];
 
 			if (msg.role === 'tool') {
-				if (prev.role !== 'assistant' || !prev.tool_calls?.length) {
+				// A tool message MUST follow an assistant message (with tool_calls) OR another tool message
+				if (prev.role !== 'assistant' && prev.role !== 'tool') {
+					continue;
+				}
+				if (prev.role === 'assistant' && !prev.tool_calls?.length) {
 					continue;
 				}
 			}
 
 			// Prevent consecutive assistant messages (Azure restriction)
 			if (msg.role === 'assistant' && prev.role === 'assistant') {
-				// Merge content if possible, or skip
-				if (msg.content && !prev.content) {
-					prev.content = msg.content;
+				// Merge content and tool calls if possible
+				if (msg.content) {
+					prev.content = (prev.content || '') + '\n' + msg.content;
 				}
-				if (msg.tool_calls && !prev.tool_calls) {
-					prev.tool_calls = msg.tool_calls;
+				if (msg.tool_calls) {
+					prev.tool_calls = [...(prev.tool_calls || []), ...msg.tool_calls];
 				}
 				continue;
 			}

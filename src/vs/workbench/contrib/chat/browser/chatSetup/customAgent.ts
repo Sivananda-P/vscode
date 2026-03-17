@@ -40,6 +40,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { relativePath } from '../../../../../base/common/resources.js';
 import { ILanguageFeaturesService } from '../../../../../editor/common/services/languageFeatures.js';
 import { IModelService } from '../../../../../editor/common/services/model.js';
+import { generateUuid } from '../../../../../base/common/uuid.js';
 import { getDefinitionsAtPosition } from '../../../../../editor/contrib/gotoSymbol/browser/goToSymbol.js';
 import { Position } from '../../../../../editor/common/core/position.js';
 import { Range } from '../../../../../editor/common/core/range.js';
@@ -156,8 +157,9 @@ export class CustomAgent
 		const MAX_TURNS = 10;
 
 		try {
-			// Map history to messages
+			// Map history to messages (reconstruction based on progress parts)
 			for (const entry of history) {
+				// 1. Add User Request
 				messages.push({ role: 'user', content: entry.request.message });
 
 				// Response can be multiple parts
@@ -218,6 +220,15 @@ export class CustomAgent
 						},
 					]);
 					return {};
+				}
+
+				let activeSkill: string | undefined;
+				if (prompt.includes('/3danim')) {
+					activeSkill = '3d_animation_designer';
+					prompt = prompt.replace('/3danim', '').trim();
+				} else if (prompt.includes('/design')) {
+					activeSkill = 'frontend_design';
+					prompt = prompt.replace('/design', '').trim();
 				}
 
 				// CRITICAL FIX: Always add current user message to messages array.
