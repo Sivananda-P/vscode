@@ -5,9 +5,23 @@
 
 import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
-import { Disposable, DisposableStore, IDisposable } from '../../../../../base/common/lifecycle.js';
-import { IChatAgentHistoryEntry, IChatAgentImplementation, IChatAgentRequest, IChatAgentResult, IChatAgentService } from '../../common/participants/chatAgents.js';
-import { IChatProgress, IChatTaskDto, IChatTask } from '../../common/chatService/chatService.js';
+import {
+	Disposable,
+	DisposableStore,
+	IDisposable,
+} from '../../../../../base/common/lifecycle.js';
+import {
+	IChatAgentHistoryEntry,
+	IChatAgentImplementation,
+	IChatAgentRequest,
+	IChatAgentResult,
+	IChatAgentService,
+} from '../../common/participants/chatAgents.js';
+import {
+	IChatProgress,
+	IChatTaskDto,
+	IChatTask,
+} from '../../common/chatService/chatService.js';
 import { IChatProgressHistoryResponseContent } from '../../common/model/chatModel.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ChatAgentLocation, ChatModeKind } from '../../common/constants.js';
@@ -18,7 +32,10 @@ import { ISemanticContextService } from '../../../../services/semanticContext/co
 import { ISearchResult } from '../../../../services/semanticContext/common/vectorStore.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { VSBuffer } from '../../../../../base/common/buffer.js';
-import { IMarkerService, MarkerSeverity } from '../../../../../platform/markers/common/markers.js';
+import {
+	IMarkerService,
+	MarkerSeverity,
+} from '../../../../../platform/markers/common/markers.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { relativePath } from '../../../../../base/common/resources.js';
 import { ILanguageFeaturesService } from '../../../../../editor/common/services/languageFeatures.js';
@@ -27,7 +44,8 @@ import { getDefinitionsAtPosition } from '../../../../../editor/contrib/gotoSymb
 import { Position } from '../../../../../editor/common/core/position.js';
 import { Range } from '../../../../../editor/common/core/range.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
- 
+import { localize } from '../../../../../nls.js';
+
 interface IToolCall {
 	id: string;
 	type: string;
@@ -43,7 +61,10 @@ interface IChatMessage {
 }
 
 /** Join a workspace root URI with a relative path safely */
-function joinWorkspacePath(root: typeof import('../../../../../base/common/uri.js').URI.prototype, relative: string) {
+function joinWorkspacePath(
+	root: typeof import('../../../../../base/common/uri.js').URI.prototype,
+	relative: string,
+) {
 	if (relative === '.' || relative === '' || relative === '/') {
 		return root;
 	}
@@ -52,39 +73,57 @@ function joinWorkspacePath(root: typeof import('../../../../../base/common/uri.j
 	return root.with({ path: root.path + '/' + clean });
 }
 
-export class CustomAgent extends Disposable implements IChatAgentImplementation {
-
-	static registerCustomAgents(instantiationService: IInstantiationService, location: ChatAgentLocation, mode: ChatModeKind): { agent: CustomAgent; disposable: IDisposable } {
+export class CustomAgent
+	extends Disposable
+	implements IChatAgentImplementation {
+	static registerCustomAgents(
+		instantiationService: IInstantiationService,
+		location: ChatAgentLocation,
+		mode: ChatModeKind,
+	): { agent: CustomAgent; disposable: IDisposable } {
 		const disposables = new DisposableStore();
-		const chatAgentService = instantiationService.invokeFunction(accessor => accessor.get(IChatAgentService));
+		const chatAgentService = instantiationService.invokeFunction((accessor) =>
+			accessor.get(IChatAgentService),
+		);
 
 		const id = `custom.agent.${location}.${mode}`;
-		const name = 'CogniAI';
+		const name = localize('chat.customAgent.name', "CogniAI");
 
-		disposables.add(chatAgentService.registerAgent(id, {
-			id,
-			name,
-			isDefault: true,
-			isCore: true,
-			modes: [mode],
-			slashCommands: [
-				{ name: 'explain', description: 'Explain how the current code works.' },
-				{ name: 'fix', description: 'Propose a fix for the problems in the current file.' },
-				{ name: 'clear', description: 'Clear the chat history.' }
-			],
-			disambiguation: [],
-			locations: [location],
-			description: 'Powered by CogniAI Professional.',
-			metadata: {
-				themeIcon: { id: 'sparkle' }
-			},
-			extensionId: nullExtensionDescription.identifier,
-			extensionVersion: undefined,
-			extensionDisplayName: nullExtensionDescription.displayName || nullExtensionDescription.name,
-			extensionPublisherId: nullExtensionDescription.publisher
-		}));
+		disposables.add(
+			chatAgentService.registerAgent(id, {
+				id,
+				name,
+				isDefault: true,
+				isCore: true,
+				modes: [mode],
+				slashCommands: [
+					{
+						name: 'explain',
+						description: localize('chat.customAgent.explain', "Explain how the current code works."),
+					},
+					{
+						name: 'fix',
+						description: localize('chat.customAgent.fix', "Propose a fix for the problems in the current file."),
+					},
+					{ name: 'clear', description: localize('chat.customAgent.clear', "Clear the chat history.") },
+				],
+				disambiguation: [],
+				locations: [location],
+				description: localize('chat.customAgent.poweredBy', "Powered by CogniAI Professional."),
+				metadata: {
+					themeIcon: { id: 'sparkle' },
+				},
+				extensionId: nullExtensionDescription.identifier,
+				extensionVersion: undefined,
+				extensionDisplayName:
+					nullExtensionDescription.displayName || nullExtensionDescription.name,
+				extensionPublisherId: nullExtensionDescription.publisher,
+			}),
+		);
 
-		const agent = disposables.add(instantiationService.createInstance(CustomAgent));
+		const agent = disposables.add(
+			instantiationService.createInstance(CustomAgent),
+		);
 		disposables.add(chatAgentService.registerAgentImplementation(id, agent));
 
 		return { agent, disposable: disposables };
@@ -93,17 +132,25 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 	constructor(
 		@IAIService private readonly aiService: IAIService,
 		@IFileService private readonly fileService: IFileService,
-		@ISemanticContextService private readonly semanticContextService: ISemanticContextService,
-		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+		@ISemanticContextService
+		private readonly semanticContextService: ISemanticContextService,
+		@IWorkspaceContextService
+		private readonly workspaceContextService: IWorkspaceContextService,
 		@IMarkerService private readonly markerService: IMarkerService,
-		@ILanguageFeaturesService private readonly languageFeaturesService: ILanguageFeaturesService,
+		@ILanguageFeaturesService
+		private readonly languageFeaturesService: ILanguageFeaturesService,
 		@IModelService private readonly modelService: IModelService,
 		@IEditorService private readonly editorService: IEditorService,
 	) {
 		super();
 	}
 
-	async invoke(request: IChatAgentRequest, progress: (parts: IChatProgress[]) => void, history: IChatAgentHistoryEntry[], token: CancellationToken): Promise<IChatAgentResult> {
+	async invoke(
+		request: IChatAgentRequest,
+		progress: (parts: IChatProgress[]) => void,
+		history: IChatAgentHistoryEntry[],
+		token: CancellationToken,
+	): Promise<IChatAgentResult> {
 		let messages: IChatMessage[] = [];
 		let turnCount = 0;
 		const MAX_TURNS = 10;
@@ -112,13 +159,15 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 			// Map history to messages
 			for (const entry of history) {
 				messages.push({ role: 'user', content: entry.request.message });
-				
+
 				// Response can be multiple parts
 				const assistantContent = entry.response
 					.map((p: IChatProgressHistoryResponseContent | IChatTaskDto) => {
 						if (p.kind === 'markdownContent') {
-						const md = p as IChatProgressHistoryResponseContent & { content: { value: string } };
-						return md.content.value;
+							const md = p as IChatProgressHistoryResponseContent & {
+								content: { value: string };
+							};
+							return md.content.value;
 						}
 						if (p.kind === 'progressTask') {
 							return (p as IChatTask).content?.value || '';
@@ -127,7 +176,7 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 					})
 					.filter(Boolean)
 					.join('\n');
-				
+
 				if (assistantContent) {
 					messages.push({ role: 'assistant', content: assistantContent });
 				}
@@ -145,7 +194,9 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 
 					let context = `[Context: Workspace Root is ${workspaceName}]`;
 					if (activeEditor?.resource && workspaceRoot) {
-						const relPath = relativePath(workspaceRoot, activeEditor.resource) || activeEditor.resource.fsPath;
+						const relPath =
+							relativePath(workspaceRoot, activeEditor.resource) ||
+							activeEditor.resource.fsPath;
 						context += ` [Active File: ${relPath}]`;
 					}
 					prompt = `${context}\n${prompt}`;
@@ -153,14 +204,19 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 				turnCount++;
 
 				// Detect slash commands
-	
+
 				if (prompt.startsWith('/explain')) {
 					prompt = `Explain this code in detail: ${prompt.replace('/explain', '').trim()}`;
 				} else if (prompt.startsWith('/fix')) {
 					prompt = `Look for bugs or improvements in this code and fix them: ${prompt.replace('/fix', '').trim()}`;
 				} else if (prompt.startsWith('/clear')) {
 					messages = [];
-					progress([{ kind: 'markdownContent', content: new MarkdownString('Chat history cleared.') }]);
+					progress([
+						{
+							kind: 'markdownContent',
+							content: new MarkdownString(localize('chat.customAgent.historyCleared', "Chat history cleared.")),
+						},
+					]);
 					return {};
 				}
 
@@ -172,15 +228,21 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 					messages.push({ role: 'user', content: prompt });
 				}
 
-				const json = await this.aiService.request(backendUrl, {
-					messages: messages,
-					projectId: 'default_project'
-				}, token);
+				const json = await this.aiService.request(
+					backendUrl,
+					{
+						messages: messages,
+						projectId: 'default_project',
+					},
+					token,
+				);
 
 				const { response, tool_calls } = json;
 
 				if (response) {
-					progress([{ kind: 'markdownContent', content: new MarkdownString(response) }]);
+					progress([
+						{ kind: 'markdownContent', content: new MarkdownString(response) },
+					]);
 					messages.push({ role: 'assistant', content: response });
 				}
 
@@ -189,88 +251,110 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 				}
 
 				// Handle Tool Calls
-				const assistantMessage: IChatMessage = { role: 'assistant', tool_calls: tool_calls };
+				const assistantMessage: IChatMessage = {
+					role: 'assistant',
+					tool_calls: tool_calls,
+				};
 				messages.push(assistantMessage);
 
 				for (const toolCall of tool_calls) {
 					const { name, arguments: argsString } = toolCall.function;
 					const args = JSON.parse(argsString);
 
-					progress([{ kind: 'progressMessage', content: new MarkdownString(`Agent executing \`${name}\`...`) }]);
+					progress([
+						{
+							kind: 'progressMessage',
+							content: new MarkdownString(localize('chat.customAgent.executingTool', "Agent executing `{0}`...", name)),
+						},
+					]);
 
 					let result;
 					try {
-					switch (name) {
-						case 'read_file':
-							result = await this.readFile(args.path);
-							break;
-						case 'write_file':
-							result = await this.writeFile(args.path, args.content, progress);
-							break;
-						case 'semantic_search':
-							result = await this.semanticSearch(args.query, args.k);
-							break;
-						case 'apply_patch':
-							result = await this.applyPatch(args.path, args.patch, progress);
-							break;
-						case 'get_diagnostics':
-							result = await this.getDiagnostics(args.path);
-							break;
-						case 'create_folder':
-							result = await this.createFolder(args.path);
-							break;
-						case 'delete_file':
-							result = await this.deleteFile(args.path);
-							break;
-						case 'list_dir':
-							result = await this.listDir(args.path);
-							break;
-						case 'go_to_definition':
-							result = await this.goToDefinition(args.symbol, args.path);
-							break;
-						case 'run_terminal':
-							result = await this.runTerminal(args.command);
-							break;
-						default:
-							result = `Error: Unknown tool ${name}`;
-					}
+						switch (name) {
+							case 'read_file':
+								result = await this.readFile(args.path);
+								break;
+							case 'write_file':
+								result = await this.writeFile(
+									args.path,
+									args.content,
+									progress,
+								);
+								break;
+							case 'semantic_search':
+								result = await this.semanticSearch(args.query, args.k);
+								break;
+							case 'apply_patch':
+								result = await this.applyPatch(args.path, args.patch, progress);
+								break;
+							case 'get_diagnostics':
+								result = await this.getDiagnostics(args.path);
+								break;
+							case 'create_folder':
+								result = await this.createFolder(args.path);
+								break;
+							case 'delete_file':
+								result = await this.deleteFile(args.path);
+								break;
+							case 'list_dir':
+								result = await this.listDir(args.path);
+								break;
+							case 'go_to_definition':
+								result = await this.goToDefinition(args.symbol, args.path);
+								break;
+							case 'run_terminal':
+								result = await this.runTerminal(args.command);
+								break;
+							default:
+								result = localize('chat.customAgent.unknownTool', "Error: Unknown tool {0}", name);
+						}
 					} catch (err) {
-						result = `Error executing tool: ${err}`;
+						result = localize('chat.customAgent.toolError', "Error executing tool: {0}", err);
 					}
 
 					messages.push({
 						role: 'tool',
 						tool_call_id: toolCall.id,
 						name: name,
-						content: typeof result === 'string' ? result : JSON.stringify(result)
+						content:
+							typeof result === 'string' ? result : JSON.stringify(result),
 					});
 				}
 			}
-
 		} catch (e) {
-			progress([{
-				kind: 'markdownContent',
-				content: new MarkdownString('Error connecting to backend: ' + (e instanceof Error ? e.message : String(e)))
-			}]);
+			progress([
+				{
+					kind: 'markdownContent',
+					content: new MarkdownString(
+						localize('chat.customAgent.errorConnecting', "Error connecting to backend: {0}", (e instanceof Error ? e.message : String(e))),
+					),
+				},
+			]);
 		}
 
 		return {};
 	}
 
 	private async readFile(relativePath: string): Promise<string> {
-		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		const workspaceRoot =
+			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceRoot) {
-			return 'Error: No workspace root found.';
+			return localize('chat.customAgent.noWorkspaceRoot', "Error: No workspace root found.");
 		}
 		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
 		const content = await this.fileService.readFile(fileUri);
 		return content.value.toString();
 	}
 
-	private async writeFile(relativePath: string, content: string, progress?: (parts: IChatProgress[]) => void): Promise<string> {
-		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+	private async writeFile(
+		relativePath: string,
+		content: string,
+		progress?: (parts: IChatProgress[]) => void,
+	): Promise<string> {
+		const workspaceRoot =
+			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceRoot) {
-			return 'Error: No workspace root found.';
+			return localize('chat.customAgent.noWorkspaceRoot', "Error: No workspace root found.");
 		}
 		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
 
@@ -290,137 +374,208 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 		if (progress) {
 			const newLines = content.split('\n');
 			const endLine = Math.max(existingLines.length, newLines.length);
-			progress([{
-				kind: 'textEdit',
-				uri: fileUri,
-				edits: [{
-					range: { startLineNumber: 1, startColumn: 1, endLineNumber: endLine + 1, endColumn: 1 },
-					text: content
-				}],
-				done: true
-			}]);
+			progress([
+				{
+					kind: 'textEdit',
+					uri: fileUri,
+					edits: [
+						{
+							range: {
+								startLineNumber: 1,
+								startColumn: 1,
+								endLineNumber: endLine + 1,
+								endColumn: 1,
+							},
+							text: content,
+						},
+					],
+					done: true,
+				},
+			]);
 		}
 
-		return `Successfully wrote ${relativePath}`;
+		return localize('chat.customAgent.successWrite', "Successfully wrote {0}", relativePath);
 	}
 
-	private async semanticSearch(query: string, k: number = 5): Promise<ISearchResult[]> {
+	private async semanticSearch(
+		query: string,
+		k: number = 5,
+	): Promise<ISearchResult[]> {
 		const searchUrl = 'http://127.0.0.1:3000/search';
 		try {
-			const json = await this.aiService.request(searchUrl, {
-				query,
-				projectId: 'default_project',
-				k
-			}, CancellationToken.None);
+			const json = await this.aiService.request(
+				searchUrl,
+				{
+					query,
+					projectId: 'default_project',
+					k,
+				},
+				CancellationToken.None,
+			);
 			return json.results || [];
 		} catch (err) {
 			// Fallback to IDE's in-memory store if backend is unavailable
-			const results = await this.semanticContextService.search(query, CancellationToken.None);
-			return results.slice(0, k).map(r => ({
+			const results = await this.semanticContextService.search(
+				query,
+				CancellationToken.None,
+			);
+			return results.slice(0, k).map((r) => ({
 				uri: r.uri,
 				range: r.range,
 				text: r.text.substring(0, 500) + '...',
-				score: r.score
+				score: r.score,
 			}));
 		}
 	}
 
-	private async applyPatch(relativePath: string, patch: string, progress?: (parts: IChatProgress[]) => void): Promise<string> {
-		// Try to apply patch as a unified diff. Fallback to full overwrite.
+	private async applyPatch(
+		relativePath: string,
+		patch: string,
+		progress?: (parts: IChatProgress[]) => void,
+	): Promise<string> {
 		try {
 			const original = await this.readFile(relativePath);
-			// Simple line-based patch: find old/new markers and apply surgically
-			// Format expected: lines starting with '-' are removed, '+' are added, ' ' are context
-			const lines = patch.split('\n');
-			const isUnifiedDiff = lines.some(l => l.startsWith('---') || l.startsWith('+++') || l.startsWith('@@'));
-			if (isUnifiedDiff) {
-				// The agent sent a real unified diff - apply using line matching
-				const originalLines = original.split('\n');
-				const result: string[] = [];
-				let i = 0;
-				for (const line of lines) {
-					if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@') || line.startsWith('diff')) {
-						continue; // Skip diff headers
-					} else if (line.startsWith('-')) {
-						i++; // Skip this line in original
-					} else if (line.startsWith('+')) {
-						result.push(line.substring(1)); // Add new line
-					} else {
-						result.push(originalLines[i] ?? line.substring(1));
-						i++;
+			const originalLines = original.split('\n');
+			const patchLines = patch.split('\n');
+
+			// Check if this is a unified diff or raw content
+			const isUnifiedDiff = patchLines.some(
+				(l) => l.startsWith('@@') || l.startsWith('---'),
+			);
+
+			if (!isUnifiedDiff) {
+				// Fallback: If AI just sent a block of code, overwrite the file (safer than mangling)
+				await this.writeFile(relativePath, patch, progress);
+				return localize('chat.customAgent.updatedContent', "Updated {0} with new content.", relativePath);
+			}
+
+			const resultLines: string[] = [...originalLines];
+			let offset = 0; // Tracks how much the file has grown/shrunk
+
+			// Professional Hunk Parsing
+			let i = 0;
+			while (i < patchLines.length) {
+				const line = patchLines[i];
+				if (line.startsWith('@@')) {
+					// Extract start line from @@ -oldStart,oldLen +newStart,newLen @@
+					const match = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/);
+					if (match) {
+						let oldIdx = parseInt(match[1]) - 1; // 0-based
+						i++; // Move to hunk content
+
+						while (i < patchLines.length && !patchLines[i].startsWith('@@')) {
+							const hunkLine = patchLines[i];
+							if (hunkLine.startsWith('-')) {
+								// Remove line at current position + offset
+								resultLines.splice(oldIdx + offset, 1);
+								offset--;
+								oldIdx++;
+							} else if (hunkLine.startsWith('+')) {
+								// Insert line at current position + offset
+								resultLines.splice(oldIdx + offset, 0, hunkLine.substring(1));
+								offset++;
+								// Notice: we DON'T increment oldIdx here because the next original line is still at the same index
+							} else {
+								// Context line — just verify and move pointer
+								oldIdx++;
+							}
+							i++;
+						}
+						continue; // Next hunk or end
 					}
 				}
-				await this.writeFile(relativePath, result.join('\n'), progress);
-				return `Applied diff patch to ${relativePath} (${result.length} lines)`;
-			} else {
-				// Agent sent full file content - write it directly
-				await this.writeFile(relativePath, patch, progress);
-				return `Wrote new content to ${relativePath}`;
+				i++;
 			}
-		} catch {
-			// File doesn't exist yet — create it
-			await this.writeFile(relativePath, patch, progress);
-			return `Created and wrote ${relativePath}`;
+
+			const finalContent = resultLines.join('\n');
+			await this.writeFile(relativePath, finalContent, progress);
+			return localize('chat.customAgent.patchSuccess', "Successfully applied professional patch to {0}", relativePath);
+		} catch (err) {
+			// Fail-safe: if patching fails, try to write the raw patch as full content if it looks valid
+			if (patch.length > 50) {
+				await this.writeFile(relativePath, patch, progress);
+				return localize('chat.customAgent.patchFullOverwrite', "Patch execution failed, performed full overwrite for safety to {0}", relativePath);
+			}
+			throw err;
 		}
 	}
 
-	private async getDiagnostics(relativePath?: string): Promise<{ file: string; message: string; severity: string; line: number }[]> {
-		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+	private async getDiagnostics(
+		relativePath?: string,
+	): Promise<
+		{ file: string; message: string; severity: string; line: number }[]
+	> {
+		const workspaceRoot =
+			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		let filterUri: URI | undefined;
 		if (relativePath && workspaceRoot) {
-			filterUri = workspaceRoot.with({ path: workspaceRoot.path + '/' + relativePath });
+			filterUri = workspaceRoot.with({
+				path: workspaceRoot.path + '/' + relativePath,
+			});
 		}
 
 		const markers = this.markerService.read({ resource: filterUri });
-		return markers.map(m => ({
+		return markers.map((m) => ({
 			file: m.resource.fsPath,
 			message: m.message,
 			severity: m.severity === MarkerSeverity.Error ? 'Error' : 'Warning',
-			line: m.startLineNumber
+			line: m.startLineNumber,
 		}));
 	}
 
 	private async createFolder(relativePath: string): Promise<string> {
-		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		const workspaceRoot =
+			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceRoot) {
-			return 'Error: No workspace root found.';
+			return localize('chat.customAgent.noWorkspaceRoot', "Error: No workspace root found.");
 		}
 		const folderUri = joinWorkspacePath(workspaceRoot, relativePath);
 		await this.fileService.createFolder(folderUri);
-		return `Created folder ${relativePath}`;
+		return localize('chat.customAgent.createdFolder', "Created folder {0}", relativePath);
 	}
 
 	private async deleteFile(relativePath: string): Promise<string> {
-		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		const workspaceRoot =
+			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceRoot) {
-			return 'Error: No workspace root found.';
+			return localize('chat.customAgent.noWorkspaceRoot', "Error: No workspace root found.");
 		}
 		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
 		await this.fileService.del(fileUri, { recursive: true });
-		return `Deleted ${relativePath}`;
+		return localize('chat.customAgent.deletedFile', "Deleted {0}", relativePath);
 	}
 
-	private async listDir(relativePath: string): Promise<{ name: string; isDir: boolean; size: number }[]> {
-		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+	private async listDir(
+		relativePath: string,
+	): Promise<{ name: string; isDir: boolean; size: number }[]> {
+		const workspaceRoot =
+			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceRoot) {
 			return [];
 		}
 		// Special case: '.' or empty means the workspace root itself
-		const dirUri = (relativePath === '.' || relativePath === '' || relativePath === '/')
-			? workspaceRoot
-			: joinWorkspacePath(workspaceRoot, relativePath);
+		const dirUri =
+			relativePath === '.' || relativePath === '' || relativePath === '/'
+				? workspaceRoot
+				: joinWorkspacePath(workspaceRoot, relativePath);
 		const result = await this.fileService.resolve(dirUri);
-		return result.children?.map(c => ({
-			name: c.name,
-			isDir: c.isDirectory,
-			size: c.size || 0
-		})) || [];
+		return (
+			result.children?.map((c) => ({
+				name: c.name,
+				isDir: c.isDirectory,
+				size: c.size || 0,
+			})) || []
+		);
 	}
 
-	private async goToDefinition(symbol: string, relativePath: string): Promise<string> {
-		const workspaceRoot = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+	private async goToDefinition(
+		symbol: string,
+		relativePath: string,
+	): Promise<string> {
+		const workspaceRoot =
+			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceRoot) {
-			return 'Error: No workspace root found.';
+			return localize('chat.customAgent.noWorkspaceRoot', "Error: No workspace root found.");
 		}
 
 		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
@@ -437,37 +592,47 @@ export class CustomAgent extends Disposable implements IChatAgentImplementation 
 		}
 
 		if (!position) {
-			return `Error: Could not find symbol "${symbol}" in ${relativePath}`;
+			return localize('chat.customAgent.symbolNotFound', "Error: Could not find symbol \"{0}\" in {1}", symbol, relativePath);
 		}
 
 		const model = this.modelService.getModel(fileUri);
 		if (!model) {
-			return `Error: Could not load model for ${relativePath}`;
+			return localize('chat.customAgent.modelLoadError', "Error: Could not load model for {0}", relativePath);
 		}
 
-		const definitions = await getDefinitionsAtPosition(this.languageFeaturesService.definitionProvider, model, position, false, CancellationToken.None);
+		const definitions = await getDefinitionsAtPosition(
+			this.languageFeaturesService.definitionProvider,
+			model,
+			position,
+			false,
+			CancellationToken.None,
+		);
 		if (definitions.length === 0) {
-			return `No definitions found for ${symbol}`;
+			return localize('chat.customAgent.noDefinitions', "No definitions found for {0}", symbol);
 		}
 
-		const results = definitions.map(d => {
+		const results = definitions.map((d) => {
 			const range = Range.lift(d.range);
 			return `${d.uri.fsPath}:${range.startLineNumber}:${range.startColumn}`;
 		});
 
-		return `Found ${definitions.length} definitions:\n${results.join('\n')}`;
+		return localize('chat.customAgent.definitionsFound', "Found {0} definitions:\n{1}", definitions.length, results.join('\n'));
 	}
 
 	private async runTerminal(command: string): Promise<string> {
 		// Delegate terminal execution to the backend server which runs in Node.js
 		try {
-			const json = await this.aiService.request('http://127.0.0.1:3000/terminal/run', {
-				command
-			}, CancellationToken.None) as { stdout: string; stderr: string; exitCode: number };
+			const json = (await this.aiService.request(
+				'http://127.0.0.1:3000/terminal/run',
+				{
+					command,
+				},
+				CancellationToken.None,
+			)) as { stdout: string; stderr: string; exitCode: number };
 			const output = [json.stdout, json.stderr].filter(Boolean).join('\n');
-			return `Exit code: ${json.exitCode}\n${output || '(no output)'}`;
+			return localize('chat.customAgent.terminalOutput', "Exit code: {0}\n{1}", json.exitCode, output || localize('chat.customAgent.noOutput', "(no output)"));
 		} catch (err) {
-			return `Terminal tool not yet connected to backend. Command requested: ${command}\nError: ${err}`;
+			return localize('chat.customAgent.terminalError', "Terminal tool not yet connected to backend. Command requested: {0}\nError: {1}", command, err);
 		}
 	}
 }

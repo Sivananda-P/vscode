@@ -102,7 +102,9 @@ export class AstService {
 						startColumn: 1,
 						endLineNumber: Math.min(i + chunkSize, lines.length),
 						endColumn: lines[Math.min(i + chunkSize, lines.length) - 1]?.length || 1
-					}
+					},
+					symbolName: '',
+					symbolType: 'chunk'
 				}
 			});
 		}

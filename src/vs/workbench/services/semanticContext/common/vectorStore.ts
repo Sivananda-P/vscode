@@ -11,9 +11,17 @@ import { VSBuffer } from '../../../../base/common/buffer.js';
 
 export const IVectorStoreService = createDecorator<IVectorStoreService>('vectorStoreService');
 
+export interface IRange {
+	readonly startLineNumber: number;
+	readonly startColumn: number;
+	readonly endLineNumber: number;
+	readonly endColumn: number;
+}
+
 export interface ISearchResult extends ISemanticSearchResult {
 	symbolName?: string;
 	symbolType?: string;
+	range: IRange;
 }
 
 export interface IVectorStoreService {

@@ -177,6 +177,8 @@ export class AiService {
 
 	private static async getExtractor() {
 		if (!this.extractor) {
+			// Xenova pipeline doesn't have ideal TS types exported for all versions, 
+			// so we use a safe check if needed, but for now we'll keep it as the return of pipeline.
 			this.extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
 		}
 		return this.extractor;
@@ -187,9 +189,15 @@ export class AiService {
 		const systemMessages = messages.filter((m): m is ChatCompletionSystemMessageParam => m?.role === 'system');
 		const otherMessages = messages.filter(m => m && m.role !== 'system');
 
-		const baseSystemPrompt = `You are CogniAI, an autonomous senior software engineer.`; // Truncated for brevity in this example replacement
+		const baseSystemPrompt = `You are CogniAI, a master software architect.
+RULES FOR CODE INTEGRATION:
+1. NEVER output partial code fragments. Always output complete, valid files if using write_file.
+2. If using apply_patch, ensure the hunk context matches the existing file EXACTLY.
+3. NEVER mix CSS rules inside HTML tags. CSS must stay inside <style> in the <head> or external files.
+4. INDENTATION: Always maintain precise indentation.
+5. NO TRUNCATION: Do not use // ... (rest of code). Provide the full functional block.`;
 
-		const finalSystemContent = baseSystemPrompt + (systemMessages.length > 0 ? '\n\nContext:\n' + systemMessages.map(m => m.content).join('\n') : '');
+		const finalSystemContent = baseSystemPrompt + (systemMessages.length > 0 ? '\n\nAdditional Context:\n' + systemMessages.map(m => m.content).join('\n') : '');
 
 		const validatedMessages: ChatCompletionMessageParam[] = [
 			{ role: 'system' as const, content: finalSystemContent }
@@ -201,7 +209,9 @@ export class AiService {
 			const prev = validatedMessages[validatedMessages.length - 1];
 
 			if (msg.role === 'tool') {
-				if (prev.role !== 'assistant' || !prev.tool_calls?.length) continue;
+				if (prev.role !== 'assistant' || !prev.tool_calls?.length) {
+					continue;
+				}
 			}
 
 			// Prevent consecutive assistant messages (Azure restriction)
@@ -223,7 +233,9 @@ export class AiService {
 			messages: validatedMessages,
 			model: process.env.AZURE_OPENAI_DEPLOYMENT_NAME || '',
 			tools: TOOLS,
-			tool_choice: 'auto'
+			tool_choice: 'auto',
+			temperature: 0.0,
+			max_tokens: 4096
 		});
 
 		const choice = chatCompletion.choices[0];
@@ -292,8 +304,26 @@ export class AiService {
 		const trimmedSuffix = suffix.slice(0, 500);
 		const trimmedContext = context.slice(0, 4000);
 
-		const systemPrompt = `You are a professional ${language} engineer. Complete the code at <FILL_IN_THE_MIDDLE>. Raw code only.`;
-		const userPrompt = `${trimmedContext ? `CONTEXT:\n${trimmedContext}\n\n` : ''}FILE: ${filePath}\nPREFIX:\n${trimmedPrefix}\n<FILL_IN_THE_MIDDLE>\nSUFFIX:\n${trimmedSuffix}`;
+		const systemPrompt = `You are an expert ${language} developer.
+TASK: Complete the code at the exact cursor position between PREFIX and SUFFIX.
+
+CRITICAL RULES:
+1. CODE ONLY: Output no explanations, no markdown backticks, and no commentary.
+2. CONTINUITY: The code must start exactly where the PREFIX ends and flow perfectly into the SUFFIX.
+3. NO REPETITION: Do NOT repeat code that already exists in the SUFFIX. If the suffix starts with "}", do not output a "}".
+4. SYNTAX: Maintain the exact indentation level and coding style of the file.
+5. FRAGMENT HANDLING: If the PREFIX ends mid-word or mid-symbol, your output must complete that symbol first.`;
+
+		const userPrompt = `${trimmedContext ? `Relevant Context from Workspace:\n${trimmedContext}\n\n` : ''}--- FILE PATH: ${filePath} ---
+--- START OF PREFIX ---
+${trimmedPrefix}
+--- END OF PREFIX ---
+
+--- START OF SUFFIX ---
+${trimmedSuffix}
+--- END OF SUFFIX ---
+
+Final Task: Provide the code that goes between END OF PREFIX and START OF SUFFIX. Output raw ${language} code only.`;
 
 		const messages = [
 			{ role: 'system' as const, content: systemPrompt },
@@ -301,45 +331,69 @@ export class AiService {
 		];
 
 		if (provider === 'anthropic') {
-			const anthropicResponse = await anthropic.messages.create({
-				model: model,
-				max_tokens: 256,
-				system: systemPrompt,
-				messages: [{ role: 'user', content: userPrompt }],
-				stream: stream as any,
-			});
-
 			if (stream) {
+				const anthropicResponse = await anthropic.messages.create({
+					model: model,
+					max_tokens: 256,
+					system: systemPrompt,
+					messages: [{ role: 'user', content: userPrompt }],
+					stream: true,
+				});
+
 				async function* anthropicGenerator(): AsyncIterable<string> {
-					for await (const chunk of anthropicResponse as any) {
-						if (chunk.type === 'content_block_delta' && chunk.delta.text) yield chunk.delta.text;
+					for await (const chunk of anthropicResponse) {
+						if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+							yield chunk.delta.text;
+						}
 					}
 				}
 				return anthropicGenerator();
+			} else {
+				const anthropicResponse = await anthropic.messages.create({
+					model: model,
+					max_tokens: 256,
+					system: systemPrompt,
+					messages: [{ role: 'user', content: userPrompt }],
+					stream: false,
+				});
+				const firstBlock = anthropicResponse.content[0];
+				if (firstBlock && firstBlock.type === 'text') {
+					return firstBlock.text;
+				}
+				return '';
 			}
-			return (anthropicResponse as any).content[0].text;
 		}
 
 		// OpenAI / Azure Shared Path
 		const client = provider === 'openai' ? openAI : azureClient;
-		const completion = await client.chat.completions.create({
-			model,
-			messages,
-			max_tokens: 256,
-			temperature: 0.1,
-			stream: stream as any,
-		});
-
+		
 		if (stream) {
+			const completion = await client.chat.completions.create({
+				model,
+				messages,
+				max_tokens: 1024,
+				temperature: 0.1,
+				stream: true,
+			});
+
 			async function* openaiGenerator(): AsyncIterable<string> {
-				for await (const chunk of completion as any) {
+				for await (const chunk of completion) {
 					const token = chunk.choices[0]?.delta?.content ?? '';
-					if (token) { yield token; }
+					if (token) {
+						yield token;
+					}
 				}
 			}
 			return openaiGenerator();
+		} else {
+			const completion = await client.chat.completions.create({
+				model,
+				messages,
+				max_tokens: 1024,
+				temperature: 0.1,
+				stream: false,
+			});
+			return completion.choices[0]?.message?.content ?? '';
 		}
-
-		return (completion as any).choices[0]?.message?.content ?? '';
 	}
 }
