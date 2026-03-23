@@ -100,6 +100,15 @@ app.post('/ai/query', async (req: Request, res: Response) => {
 	}
 });
 
+// --- AI Skills List Endpoint ---
+app.post('/ai/skills', (_req: Request, res: Response) => {
+	const skills = SkillService.getSkills().map(s => ({
+		name: s.name,
+		description: s.description
+	}));
+	res.json({ skills });
+});
+
 // --- Indexing Endpoint ---
 app.post('/embeddings/index', async (req: Request, res: Response) => {
 	const { projectId, chunks } = req.body; // chunks: Array of { text, metadata }
@@ -303,7 +312,8 @@ app.post('/ai/complete/stream', async (req: Request, res: Response) => {
 
 // --- Start Server -------------------------------------------------------------
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
 	console.log(`AI Backend running on http://localhost:${PORT}`);
+	await SkillService.loadSkills();
 });
 

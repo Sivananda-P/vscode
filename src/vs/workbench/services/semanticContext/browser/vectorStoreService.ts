@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IVectorStoreService, ISearchResult, IRange } from '../common/vectorStore.js';
+import { IVectorStoreService, type ISearchResult, type IRange } from '../common/vectorStore.js';
 import { ICodeChunk } from '../common/semanticIndexer.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IAIService } from '../../../../platform/ai/common/ai.js';

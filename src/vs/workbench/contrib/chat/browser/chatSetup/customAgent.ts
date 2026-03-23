@@ -11,6 +11,7 @@ import {
 	IDisposable,
 } from '../../../../../base/common/lifecycle.js';
 import {
+	IChatAgentCommand,
 	IChatAgentHistoryEntry,
 	IChatAgentImplementation,
 	IChatAgentRequest,
@@ -40,7 +41,6 @@ import { URI } from '../../../../../base/common/uri.js';
 import { relativePath } from '../../../../../base/common/resources.js';
 import { ILanguageFeaturesService } from '../../../../../editor/common/services/languageFeatures.js';
 import { IModelService } from '../../../../../editor/common/services/model.js';
-import { generateUuid } from '../../../../../base/common/uuid.js';
 import { getDefinitionsAtPosition } from '../../../../../editor/contrib/gotoSymbol/browser/goToSymbol.js';
 import { Position } from '../../../../../editor/common/core/position.js';
 import { Range } from '../../../../../editor/common/core/range.js';
@@ -59,6 +59,11 @@ interface IChatMessage {
 	tool_calls?: IToolCall[];
 	tool_call_id?: string;
 	name?: string;
+}
+
+interface SkillInfo {
+	name: string;
+	description: string;
 }
 
 /** Join a workspace root URI with a relative path safely */
@@ -90,6 +95,29 @@ export class CustomAgent
 		const id = `custom.agent.${location}.${mode}`;
 		const name = localize('chat.customAgent.name', "CogniAI");
 
+		const dynamicSlashCommands: IChatAgentCommand[] = [
+			{
+				name: 'explain',
+				description: localize('chat.customAgent.explain', "Explain how the current code works."),
+			},
+			{
+				name: 'fix',
+				description: localize('chat.customAgent.fix', "Propose a fix for the problems in the current file."),
+			},
+			{ name: 'clear', description: localize('chat.customAgent.clear', "Clear the chat history.") },
+			{ name: '3danim', description: localize('chat.customAgent.run3dAnim', "3D Animation Assistant") },
+			{ name: 'design', description: localize('chat.customAgent.runFrontendDesign', "Frontend Design Assistant") },
+			{ name: 'brainstorming', description: localize('chat.customAgent.runBrainstorming', "Brainstorming Assistant") },
+			{ name: 'debugging', description: localize('chat.customAgent.runDebugging', "Systematic Debugging Assistant") },
+			{ name: 'gitpush', description: localize('chat.customAgent.runGitPush', "Git Pushing Assistant") },
+			{ name: 'tdd', description: localize('chat.customAgent.runTDD', "Test-Driven Development Assistant") },
+			{ name: 'react', description: localize('chat.customAgent.runReact', "React Best Practices Assistant") },
+			{ name: 'fullstack', description: localize('chat.customAgent.runFullstack', "Senior Fullstack Engineer") },
+			{ name: 'review', description: localize('chat.customAgent.runReview', "Professional Code Reviewer") },
+			{ name: 'testing', description: localize('chat.customAgent.runTesting', "WebApp Testing Assistant") },
+			{ name: 'available-skills', description: localize('chat.customAgent.listSkills', "List all available specialized skills.") },
+		];
+
 		disposables.add(
 			chatAgentService.registerAgent(id, {
 				id,
@@ -97,17 +125,7 @@ export class CustomAgent
 				isDefault: true,
 				isCore: true,
 				modes: [mode],
-				slashCommands: [
-					{
-						name: 'explain',
-						description: localize('chat.customAgent.explain', "Explain how the current code works."),
-					},
-					{
-						name: 'fix',
-						description: localize('chat.customAgent.fix', "Propose a fix for the problems in the current file."),
-					},
-					{ name: 'clear', description: localize('chat.customAgent.clear', "Clear the chat history.") },
-				],
+				slashCommands: dynamicSlashCommands,
 				disambiguation: [],
 				locations: [location],
 				description: localize('chat.customAgent.poweredBy', "Powered by CogniAI Professional."),
@@ -123,7 +141,7 @@ export class CustomAgent
 		);
 
 		const agent = disposables.add(
-			instantiationService.createInstance(CustomAgent),
+			instantiationService.createInstance(CustomAgent, dynamicSlashCommands),
 		);
 		disposables.add(chatAgentService.registerAgentImplementation(id, agent));
 
@@ -131,6 +149,7 @@ export class CustomAgent
 	}
 
 	constructor(
+		private readonly dynamicSlashCommands: IChatAgentCommand[],
 		@IAIService private readonly aiService: IAIService,
 		@IFileService private readonly fileService: IFileService,
 		@ISemanticContextService
@@ -144,6 +163,28 @@ export class CustomAgent
 		@IEditorService private readonly editorService: IEditorService,
 	) {
 		super();
+		this.fetchAndRegisterSkills();
+	}
+
+	private async fetchAndRegisterSkills() {
+		try {
+			const json = await this.aiService.request('http://127.0.0.1:3000/ai/skills', {}, CancellationToken.None) as { skills: SkillInfo[] };
+			const skills = json.skills || [];
+			const existingNames = new Set(this.dynamicSlashCommands.map(c => c.name));
+			
+			for (const skill of skills) {
+				const commandName = skill.name.toLowerCase();
+				if (!existingNames.has(commandName)) {
+					this.dynamicSlashCommands.push({
+						name: commandName,
+						description: skill.description || localize('chat.customAgent.skillDesc', "Specialized skill: {0}", skill.name)
+					});
+					existingNames.add(commandName);
+				}
+			}
+		} catch (e) {
+			console.error('Failed to load skills for autocomplete', e);
+		}
 	}
 
 	async invoke(
@@ -185,27 +226,12 @@ export class CustomAgent
 			}
 
 			const backendUrl = 'http://127.0.0.1:3000/ai/query';
-			let prompt = request.message;
+			let prompt = request.message.trim();
 
 			while (turnCount < MAX_TURNS && !token.isCancellationRequested) {
-				if (turnCount === 0) {
-					const activeEditor = this.editorService.activeEditor;
-					const workspace = this.workspaceContextService.getWorkspace();
-					const workspaceRoot = workspace.folders[0]?.uri;
-					const workspaceName = workspace.folders[0]?.name || 'root';
-
-					let context = `[Context: Workspace Root is ${workspaceName}]`;
-					if (activeEditor?.resource && workspaceRoot) {
-						const relPath =
-							relativePath(workspaceRoot, activeEditor.resource) ||
-							activeEditor.resource.fsPath;
-						context += ` [Active File: ${relPath}]`;
-					}
-					prompt = `${context}\n${prompt}`;
-				}
 				turnCount++;
 
-				// Detect slash commands
+				// 1. Detect core slash commands (must be at the start of the message)
 
 				if (prompt.startsWith('/explain')) {
 					prompt = `Explain this code in detail: ${prompt.replace('/explain', '').trim()}`;
@@ -220,15 +246,105 @@ export class CustomAgent
 						},
 					]);
 					return {};
+				} else if (prompt.startsWith('/available-skills')) {
+					try {
+						const json = await this.aiService.request('http://127.0.0.1:3000/ai/skills', {}, token) as { skills: SkillInfo[] };
+						const skills = json.skills || [];
+						let skillList = localize('chat.customAgent.availableSkills', "### 🌟 Available Specialized Skills\n\n");
+						
+						// Featured ones first
+						const featured = ['brainstorming', 'systematic-debugging', 'git-pushing', 'test-driven-development', 'react-best-practices', 'senior-fullstack', 'code-reviewer', 'webapp-testing'];
+						
+						skillList += localize('chat.customAgent.featuredHeader', "**Featured Skills:**\n");
+						featured.forEach(f => {
+							const s = skills.find((sk: SkillInfo) => sk.name.toLowerCase() === f);
+							if (s) {
+								skillList += `- **/${f}**: ${s.description}\n`;
+							}
+						});
+
+						skillList += localize('chat.customAgent.moreSkillsHeader', "\n**More Skills (Partial List):**\n");
+						const otherSkills = skills.filter((sk: SkillInfo) => !featured.includes(sk.name.toLowerCase())).slice(0, 15);
+						otherSkills.forEach((s: SkillInfo) => {
+							skillList += `- **/${s.name.toLowerCase()}**: ${s.description}\n`;
+						});
+
+						if (skills.length > (featured.length + otherSkills.length)) {
+							skillList += localize('chat.customAgent.totalSkillsHint', "\n... and {0} more! Try typing `/` followed by any skill name.", skills.length - featured.length - otherSkills.length);
+						}
+
+						progress([{ kind: 'markdownContent', content: new MarkdownString(skillList) }]);
+						return {};
+					} catch (e) {
+						progress([{ kind: 'markdownContent', content: new MarkdownString(localize('chat.customAgent.skillsLoadError', "Error loading skills: {0}", String(e))) }]);
+						return {};
+					}
 				}
 
 				let activeSkill: string | undefined;
+
+				// 1. Check for legacy/featured hardcoded aliases
 				if (prompt.includes('/3danim')) {
 					activeSkill = '3d_animation_designer';
 					prompt = prompt.replace('/3danim', '').trim();
 				} else if (prompt.includes('/design')) {
 					activeSkill = 'frontend_design';
 					prompt = prompt.replace('/design', '').trim();
+				} else if (prompt.includes('/debugging')) {
+					activeSkill = 'systematic-debugging';
+					prompt = prompt.replace('/debugging', '').trim();
+				} else if (prompt.includes('/gitpush')) {
+					activeSkill = 'git-pushing';
+					prompt = prompt.replace('/gitpush', '').trim();
+				} else if (prompt.includes('/tdd')) {
+					activeSkill = 'test-driven-development';
+					prompt = prompt.replace('/tdd', '').trim();
+				} else if (prompt.includes('/react')) {
+					activeSkill = 'react-best-practices';
+					prompt = prompt.replace('/react', '').trim();
+				} else if (prompt.includes('/fullstack')) {
+					activeSkill = 'senior-fullstack';
+					prompt = prompt.replace('/fullstack', '').trim();
+				} else if (prompt.includes('/review')) {
+					activeSkill = 'code-reviewer';
+					prompt = prompt.replace('/review', '').trim();
+				} else if (prompt.includes('/testing')) {
+					activeSkill = 'webapp-testing';
+					prompt = prompt.replace('/testing', '').trim();
+				} else {
+					// 2. Dynamic Slash Command Detection
+					const skillMatch = prompt.match(/^\/([a-zA-Z0-9_-]+)/);
+					if (skillMatch) {
+						const skillCandidate = skillMatch[1].toLowerCase();
+						const reserved = [
+							'explain', 'fix', 'clear', 'available-skills',
+							'hooks', 'models', 'tools', 'plugins', 'debug',
+							'agents', 'skills', 'instructions', 'prompts',
+							'fork', 'rename', 'autoapprove', 'disableautoapprove',
+							'yolo', 'disableyolo', 'help'
+						];
+						if (!reserved.includes(skillCandidate)) {
+							activeSkill = skillCandidate;
+							prompt = prompt.replace(`/${skillCandidate}`, '').trim();
+						}
+					}
+				}
+
+				// 3. Prepend context only on the first turn if no slash command intercepted control
+				if (turnCount === 1) {
+					const activeEditor = this.editorService.activeEditor;
+					const workspace = this.workspaceContextService.getWorkspace();
+					const workspaceRoot = workspace.folders[0]?.uri;
+					const workspaceName = workspace.folders[0]?.name || 'root';
+
+					let context = `[Context: Workspace Root is ${workspaceName}]`;
+					if (activeEditor?.resource && workspaceRoot) {
+						const relPath =
+							relativePath(workspaceRoot, activeEditor.resource) ||
+							activeEditor.resource.fsPath;
+						context += ` [Active File: ${relPath}]`;
+					}
+					prompt = `${context}\n${prompt}`;
 				}
 
 				// CRITICAL FIX: Always add current user message to messages array.
@@ -244,6 +360,7 @@ export class CustomAgent
 					{
 						messages: messages,
 						projectId: 'default_project',
+						skill: activeSkill,
 					},
 					token,
 				);

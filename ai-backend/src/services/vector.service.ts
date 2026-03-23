@@ -87,7 +87,10 @@ export class VectorService {
 			
 			// Fail-safe 2: Handle "Found field not in schema" (Schema Mismatch)
 			// This happens if the table was created with an old schema. We reset it.
-			if (err?.message?.includes('Found field not in schema') || err?.message?.includes('schema mismatch')) {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			if (errorMessage.includes('Found field not in schema') || 
+				errorMessage.includes('schema mismatch') || 
+				errorMessage.includes('not in schema')) {
 				
 				// Ensure only one request triggers healing
 				if (this.creationLocks.has(tableName)) {

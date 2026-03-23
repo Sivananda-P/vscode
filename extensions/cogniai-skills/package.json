@@ -16,6 +16,46 @@
 			{
 				"command": "cogniai.runFrontendDesign",
 				"title": "CogniAI: Frontend Design Assistant"
+			},
+			{
+				"command": "cogniai.runBrainstorming",
+				"title": "CogniAI: Brainstorming Assistant"
+			},
+			{
+				"command": "cogniai.runDebugging",
+				"title": "CogniAI: Systematic Debugging Assistant"
+			},
+			{
+				"command": "cogniai.runGitPush",
+				"title": "CogniAI: Git Pushing Assistant"
+			},
+			{
+				"command": "cogniai.runTDD",
+				"title": "CogniAI: Test-Driven Development (TDD) Assistant"
+			},
+			{
+				"command": "cogniai.runReactBestPractices",
+				"title": "CogniAI: React Best Practices Assistant"
+			},
+			{
+				"command": "cogniai.runSeniorFullstack",
+				"title": "CogniAI: Senior Fullstack Engineer Assistant"
+			},
+			{
+				"command": "cogniai.runEthicalHacking",
+				"title": "CogniAI: Ethical Hacking Assistant"
+			},
+			{
+				"command": "cogniai.runBurpSuite",
+				"title": "CogniAI: Burp Suite Testing Assistant"
+			},
+			{
+				"command": "cogniai.runCodeReviewer",
+				"title": "CogniAI: Professional Code Reviewer Assistant"
+			},
+			{
+				"command": "cogniai.runWebAppTesting",
+				"title": "CogniAI: WebApp Testing Assistant (Playwright)"
 			}
 		]
 	}

@@ -49,6 +49,10 @@ export class SkillService {
 		return this.skills.get(name.toLowerCase());
 	}
 
+	static getSkills(): ISkill[] {
+		return Array.from(this.skills.values());
+	}
+
 	static async getSystemPrompt(skillName?: string): Promise<string> {
 		if (!skillName) {
 			return '';
