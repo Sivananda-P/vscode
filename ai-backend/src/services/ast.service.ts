@@ -18,13 +18,14 @@ export interface ICodeChunk {
 		};
 		symbolName?: string;
 		symbolType?: string;
+		mtime?: number;
 	};
 }
 
 export class AstService {
-	static parseFile(uri: string, text: string, languageId: string): ICodeChunk[] {
+	static parseFile(uri: string, text: string, languageId: string, mtime: number = 0): ICodeChunk[] {
 		if (!['ts', 'js', 'tsx', 'jsx'].includes(languageId)) {
-			return this.fallbackChunking(uri, text);
+			return this.fallbackChunking(uri, text, 50, mtime);
 		}
 
 		try {
@@ -56,7 +57,8 @@ export class AstService {
 							uri,
 							range,
 							symbolName,
-							symbolType: this.getKindString(node.kind)
+							symbolType: this.getKindString(node.kind),
+							mtime
 						}
 					});
 				}
@@ -66,7 +68,7 @@ export class AstService {
 			walk(sourceFile);
 
 			if (chunks.length === 0) {
-				return this.fallbackChunking(uri, text);
+				return this.fallbackChunking(uri, text, 50, mtime);
 			}
 
 			return chunks;
@@ -87,27 +89,69 @@ export class AstService {
 		}
 	}
 
-	private static fallbackChunking(uri: string, text: string, chunkSize = 50): ICodeChunk[] {
+	private static fallbackChunking(uri: string, text: string, chunkSize = 50, mtime = 0): ICodeChunk[] {
 		const lines = text.split('\n');
+		const lang = uri.split('.').pop()?.toLowerCase() || '';
 		const chunks: ICodeChunk[] = [];
-		for (let i = 0; i < lines.length; i += chunkSize) {
-			const chunkText = lines.slice(i, i + chunkSize).join('\n');
-			chunks.push({
-				text: chunkText,
-				metadata: {
-					id: `${uri}#fallback-${i}`,
-					uri,
-					range: {
-						startLineNumber: i + 1,
-						startColumn: 1,
-						endLineNumber: Math.min(i + chunkSize, lines.length),
-						endColumn: lines[Math.min(i + chunkSize, lines.length) - 1]?.length || 1
-					},
-					symbolName: '',
-					symbolType: 'chunk'
-				}
-			});
+
+		// Professional Regex-based boundary detection for common languages
+		const boundaryRegexes: Record<string, RegExp> = {
+			python: /^(def\s+\w+|class\s+\w+)/,
+			go: /^(func\s+\w+|type\s+\w+)/,
+			java: /^(public|private|protected|class|interface|enum)\s+/,
+			rust: /^(fn\s+\w+|struct\s+\w+|enum\s+\w+|impl\s+\w+)/,
+			cpp: /^(class|struct|namespace|template)\s+/,
+			c: /^(struct|enum|union|typedef)\s+/,
+		};
+
+		const regex = boundaryRegexes[lang];
+		let currentChunkLines: string[] = [];
+		let startLine = 1;
+
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			const isBoundary = regex?.test(line.trim());
+
+			if (isBoundary && currentChunkLines.length >= chunkSize / 2) {
+				// Flush current chunk
+				this.pushChunk(chunks, uri, currentChunkLines.join('\n'), startLine, i, mtime);
+				currentChunkLines = [];
+				startLine = i + 1;
+			}
+
+			currentChunkLines.push(line);
+
+			if (currentChunkLines.length >= chunkSize * 1.5) {
+				// Hard limit to avoid giant chunks
+				this.pushChunk(chunks, uri, currentChunkLines.join('\n'), startLine, i + 1, mtime);
+				currentChunkLines = [];
+				startLine = i + 2;
+			}
 		}
+
+		if (currentChunkLines.length > 0) {
+			this.pushChunk(chunks, uri, currentChunkLines.join('\n'), startLine, lines.length, mtime);
+		}
+
 		return chunks;
+	}
+
+	private static pushChunk(chunks: ICodeChunk[], uri: string, text: string, startLine: number, endLine: number, mtime: number): void {
+		chunks.push({
+			text,
+			metadata: {
+				id: `${uri}#L${startLine}-${endLine}`,
+				uri,
+				range: {
+					startLineNumber: startLine,
+					startColumn: 1,
+					endLineNumber: endLine,
+					endColumn: 1 // Simplified
+				},
+				symbolName: '',
+				symbolType: 'chunk',
+				mtime
+			}
+		});
 	}
 }

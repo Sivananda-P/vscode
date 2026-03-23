@@ -136,13 +136,13 @@ app.post('/embeddings/index', async (req: Request, res: Response) => {
 
 // --- Server-Side AST Indexing Endpoint ---
 app.post('/embeddings/index-file', async (req: Request, res: Response) => {
-	const { projectId, uri, text, languageId } = req.body;
+	const { projectId, uri, text, languageId, skipIndexUpdate, mtime } = req.body;
 
 	try {
 		console.log(`[AI] Server-side indexing for ${uri} (${languageId})...`);
 
 		// 1. Perform Professional AST Parsing
-		const chunks = AstService.parseFile(uri, text, languageId);
+		const chunks = AstService.parseFile(uri, text, languageId, mtime);
 		console.log(`[AI] Extracted ${chunks.length} professional chunks.`);
 
 		// 2. Embed
@@ -156,12 +156,48 @@ app.post('/embeddings/index-file', async (req: Request, res: Response) => {
 		}));
 
 		// 3. Store
-		await VectorService.indexChunks(projectId, formattedChunks);
+		await VectorService.indexChunks(projectId || 'default_project', formattedChunks, skipIndexUpdate);
 
 		res.json({ success: true, count: chunks.length });
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
 		console.error('Server-Side Indexing Error:', message);
+		res.status(500).json({ error: message });
+	}
+});
+
+// --- Metadata & Cleanup Endpoints ---
+
+/**
+ * POST /embeddings/mtimes
+ * Returns a list of all [uri, mtime] pairs for a project.
+ */
+app.post('/embeddings/mtimes', async (req: Request, res: Response) => {
+	const { projectId } = req.body;
+	try {
+		console.log(`[Vector] Fetching file mtimes for project: ${projectId}`);
+		const mtimes = await VectorService.getFileMtimes(projectId || 'default_project');
+		res.json({ mtimes });
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.error('Get Mtimes Error:', message);
+		res.status(500).json({ error: message });
+	}
+});
+
+/**
+ * POST /embeddings/delete
+ * Deletes all chunks for a specific file (URI).
+ */
+app.post('/embeddings/delete', async (req: Request, res: Response) => {
+	const { projectId, uri } = req.body;
+	try {
+		console.log(`[Vector] Deleting chunks for URI: ${uri} in project: ${projectId}`);
+		await VectorService.deleteChunks(projectId || 'default_project', uri);
+		res.json({ success: true });
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.error('Delete Chunks Error:', message);
 		res.status(500).json({ error: message });
 	}
 });
@@ -312,7 +348,7 @@ app.post('/ai/complete/stream', async (req: Request, res: Response) => {
 
 // --- Start Server -------------------------------------------------------------
 
-app.listen(PORT, async () => {
+app.listen(Number(PORT), '0.0.0.0', async () => {
 	console.log(`AI Backend running on http://localhost:${PORT}`);
 	await SkillService.loadSkills();
 });

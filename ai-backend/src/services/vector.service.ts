@@ -35,7 +35,7 @@ export class VectorService {
 	/**
 	 * Indexes chunks into LanceDB.
 	 */
-	static async indexChunks(projectId: string, chunks: { text: string; vector: number[]; metadata: any }[]): Promise<void> {
+	static async indexChunks(projectId: string, chunks: { text: string; vector: number[]; metadata: any }[], skipIndexUpdate?: boolean): Promise<void> {
 		if (chunks.length === 0) {
 			return;
 		}
@@ -53,7 +53,8 @@ export class VectorService {
 				filePath: c.metadata.filePath || '',
 				range: c.metadata.range || { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
 				symbolName: c.metadata.symbolName || '',
-				symbolType: c.metadata.symbolType || 'symbol'
+				symbolType: c.metadata.symbolType || 'symbol',
+				mtime: c.metadata.mtime || 0
 			}
 		}));
 
@@ -84,14 +85,14 @@ export class VectorService {
 				await table.add(normalizedChunks);
 				return;
 			}
-			
+
 			// Fail-safe 2: Handle "Found field not in schema" (Schema Mismatch)
 			// This happens if the table was created with an old schema. We reset it.
 			const errorMessage = err instanceof Error ? err.message : String(err);
-			if (errorMessage.includes('Found field not in schema') || 
-				errorMessage.includes('schema mismatch') || 
+			if (errorMessage.includes('Found field not in schema') ||
+				errorMessage.includes('schema mismatch') ||
 				errorMessage.includes('not in schema')) {
-				
+
 				// Ensure only one request triggers healing
 				if (this.creationLocks.has(tableName)) {
 					// Wait for the other request to finish healing
@@ -134,6 +135,44 @@ export class VectorService {
 		} catch (err) {
 			console.error(`[Vector] Search failed on table ${tableName}:`, err);
 			return [];
+		}
+	}
+
+	static async getFileMtimes(projectId: string): Promise<[string, number][]> {
+		const db = await this.connect();
+		const tableName = `project_${projectId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+		try {
+			const table = await db.openTable(tableName);
+			// Select unique URIs and their max mtimes
+			const results = await table.query().toArray();
+
+			// Deduplicate by URI (taking the latest mtime if multiple chunks exist)
+			const mtimes = new Map<string, number>();
+			for (const r of results) {
+				const uri = r.metadata.uri;
+				const mtime = r.metadata.mtime;
+				if (!mtimes.has(uri) || mtime > (mtimes.get(uri) || 0)) {
+					mtimes.set(uri, mtime);
+				}
+			}
+			return Array.from(mtimes.entries());
+		} catch (err) {
+			console.error(`[Vector] getFileMtimes failed for ${tableName}:`, err);
+			return [];
+		}
+	}
+
+	static async deleteChunks(projectId: string, uri: string): Promise<void> {
+		const db = await this.connect();
+		const tableName = `project_${projectId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+		try {
+			const table = await db.openTable(tableName);
+			console.log(`[Vector] Deleting chunks for ${uri} from ${tableName}.`);
+			await table.delete(`metadata.uri = '${uri}'`);
+		} catch (err: any) {
+			console.error(`[Vector] Failed to delete chunks for ${uri}:`, err.message);
 		}
 	}
 }

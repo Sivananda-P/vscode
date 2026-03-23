@@ -23,6 +23,7 @@ import { IOutputService, Extensions as OutputExt, IOutputChannelRegistry } from 
 import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { IConfigurationRegistry, Extensions as ConfigurationExtensions } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { Extensions as WorkbenchExtensions, IWorkbenchContributionsRegistry } from '../../../common/contributions.js';
 import { LifecyclePhase } from '../../lifecycle/common/lifecycle.js';
@@ -38,6 +39,23 @@ registerSingleton(IEmbeddingProvider, GroqEmbeddingProvider, InstantiationType.D
 registerSingleton(IVectorStoreService, VectorStoreServiceClient, InstantiationType.Delayed);
 registerSingleton(INativeEmbeddingService, NativeEmbeddingServiceClient, InstantiationType.Delayed);
 registerSingleton(ISemanticContextService, SemanticContextService, InstantiationType.Delayed);
+
+// -- Register Configuration -----------------------------------------------------
+const configurationRegistry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
+configurationRegistry.registerConfiguration({
+	id: 'cogniai',
+	order: 100,
+	title: localize('cogniai', "CogniAI"),
+	type: 'object',
+	properties: {
+		'cogniai.backendUrl': {
+			type: 'string',
+			default: 'http://127.0.0.1:3000',
+			description: localize('backendUrl', "URL of the AI Backend server (Standalone Node.js server)."),
+			scope: 1 // ConfigurationScope.WINDOW
+		}
+	}
+});
 
 
 // -- Output Channel -------------------------------------------------------------

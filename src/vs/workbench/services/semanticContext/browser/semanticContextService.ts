@@ -204,12 +204,13 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 		}
 		const store = await this.ensureVectorStore();
 
-		// Fast-path: check mtime before doing ANY work
+		let currentMtime = 0;
 		try {
 			const stat = await this.fileService.resolve(uri, { resolveMetadata: true });
+			currentMtime = stat.mtime;
 			const indexedAt = mtimesMap ? mtimesMap.get(uri.toString()) : (await store.getFileMtimes()).find(m => m[0] === uri.toString())?.[1];
 
-			if (indexedAt && stat.mtime <= indexedAt) {
+			if (indexedAt && currentMtime <= indexedAt) {
 				this.logService.trace(`SemanticContextService: skipping ${uri.fsPath} (unchanged)`);
 				return;
 			}
@@ -232,9 +233,7 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 				const modelRef = await this.textModelService.createModelReference(uri);
 				try {
 					const text = modelRef.object.textEditorModel.getValue();
-					// store.indexFile is expected to handle chunking, embedding, and storing
-					// and return the number of chunks created.
-					chunksCount = await store.indexFile(uri, text, ext, skipIndexUpdate);
+					chunksCount = await store.indexFile(uri, text, ext, skipIndexUpdate, currentMtime);
 				} finally {
 					modelRef.dispose();
 				}
@@ -242,8 +241,7 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 				// Fallback path: Use local symbols for other languages
 				const chunks = await this.indexer.indexFile(uri, CancellationToken.None);
 				if (chunks.length === 0) {
-					// Even if no chunks, we should record the mtime to avoid re-scanning
-					await store.addChunks([], [], skipIndexUpdate);
+					await store.addChunks([], [], skipIndexUpdate, currentMtime);
 					if (wasPreviouslyReady) {
 						this.setStatus('ready');
 					}
@@ -256,7 +254,7 @@ export class SemanticContextService extends Disposable implements ISemanticConte
 				const binaryEmbeddings = embeddings.map(e => VSBuffer.wrap(new Uint8Array(e.buffer, e.byteOffset, e.byteLength)));
 
 				await store.deleteChunks(uri, skipIndexUpdate);
-				await store.addChunks(chunks, binaryEmbeddings, skipIndexUpdate);
+				await store.addChunks(chunks, binaryEmbeddings, skipIndexUpdate, currentMtime);
 
 				// Update dependency graph
 				this.dependencyGraph.removeFile(uri);

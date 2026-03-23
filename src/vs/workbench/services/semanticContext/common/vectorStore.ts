@@ -29,10 +29,10 @@ export interface IVectorStoreService {
 
 	init(): Promise<void>;
 	/** Add chunks and their embeddings to the store. */
-	addChunks(chunks: ICodeChunk[], embeddings: VSBuffer[], skipIndexUpdate?: boolean): Promise<void>;
+	addChunks(chunks: ICodeChunk[], embeddings: VSBuffer[], skipIndexUpdate?: boolean, mtime?: number): Promise<void>;
 
 	/** Index a file by sending its text to the backend for server-side parsing/chunking. Returns chunks count. */
-	indexFile(uri: URI, text: string, languageId: string, skipIndexUpdate?: boolean): Promise<number>;
+	indexFile(uri: URI, text: string, languageId: string, skipIndexUpdate?: boolean, mtime?: number): Promise<number>;
 
 	/** Delete all chunks for a file. */
 	deleteChunks(uri: URI, skipIndexUpdate?: boolean): Promise<void>;

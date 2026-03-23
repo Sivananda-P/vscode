@@ -11,6 +11,7 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 
 /**
  * Professional VectorStore client that proxies all requests to the AI Backend.
@@ -26,20 +27,26 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 
 	constructor(
 		@IAIService private readonly aiService: IAIService,
-		@ILogService private readonly logService: ILogService
+		@ILogService private readonly logService: ILogService,
+		@IConfigurationService private readonly configurationService: IConfigurationService
 	) {
 		super();
+	}
+
+	private get backendUrl(): string {
+		const url = this.configurationService.getValue<string>('cogniai.backendUrl') || 'http://localhost:3000';
+		return url.endsWith('/') ? url.slice(0, -1) : url;
 	}
 
 	async init(): Promise<void> {
 		this.lastCheckTime = Date.now();
 		try {
-			await this.aiService.request('http://127.0.0.1:3000/ai/query', { prompt: 'ping' }, CancellationToken.None);
+			await this.aiService.request(`${this.backendUrl}/ai/query`, { prompt: 'ping' }, CancellationToken.None);
 			this.backendAvailable = true;
-			this.logService.info('VectorStoreServiceClient: Backend connectivity verified.');
+			this.logService.info(`VectorStoreServiceClient: Backend connectivity verified at ${this.backendUrl}`);
 		} catch (err) {
 			this.backendAvailable = false;
-			this.logService.warn('VectorStoreServiceClient: Backend not reachable. Semantic features will be limited.');
+			this.logService.warn(`VectorStoreServiceClient: Backend not reachable at ${this.backendUrl}. Semantic features will be limited.`);
 		}
 	}
 
@@ -55,21 +62,21 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 
 		this.lastCheckTime = now;
 		try {
-			await this.aiService.request('http://127.0.0.1:3000/ai/query', { prompt: 'ping' }, CancellationToken.None);
+			await this.aiService.request(`${this.backendUrl}/ai/query`, { prompt: 'ping' }, CancellationToken.None);
 			this.backendAvailable = true;
-			this.logService.info('VectorStoreServiceClient: Backend connectivity restored.');
+			this.logService.info(`VectorStoreServiceClient: Backend connectivity restored at ${this.backendUrl}`);
 			return true;
 		} catch {
 			return false;
 		}
 	}
 
-	async addChunks(chunks: ICodeChunk[], embeddings: VSBuffer[], skipIndexUpdate?: boolean): Promise<void> {
+	async addChunks(chunks: ICodeChunk[], embeddings: VSBuffer[], skipIndexUpdate?: boolean, mtime?: number): Promise<void> {
 		if (!(await this.checkConnectivity())) {
 			return;
 		}
 
-		const backendUrl = 'http://127.0.0.1:3000/embeddings/index';
+		const backendUrl = `${this.backendUrl}/embeddings/index`;
 
 		// Prepare chunks with metadata for the backend
 		const backendChunks = chunks.map(c => ({
@@ -80,7 +87,8 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 				filePath: c.filePath,
 				range: c.range,
 				symbolName: c.symbolName,
-				symbolType: c.symbolType
+				symbolType: c.symbolType,
+				mtime: mtime || 0
 			}
 		}));
 
@@ -91,13 +99,26 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 			}, CancellationToken.None);
 		} catch (err) {
 			this.backendAvailable = false;
-			this.logService.error(`VectorStoreServiceClient: Indexing failed: ${err}`);
+			this.logService.error(`VectorStoreServiceClient: addChunks failed: ${err}`);
 		}
 	}
 
 	async deleteChunks(uri: URI, skipIndexUpdate?: boolean): Promise<void> {
-		// Backend delete logic could be implemented here
-		// For now, indexing overwrites (INSERT OR REPLACE logic on backend)
+		if (!(await this.checkConnectivity())) {
+			return;
+		}
+
+		const backendUrl = `${this.backendUrl}/embeddings/delete`;
+		try {
+			await this.aiService.request(backendUrl, {
+				projectId: 'default_project',
+				uri: uri.toString()
+			}, CancellationToken.None);
+			this.logService.trace(`VectorStoreServiceClient: Deleted chunks for ${uri.toString()}`);
+		} catch (err) {
+			this.backendAvailable = false;
+			this.logService.error(`VectorStoreServiceClient: deleteChunks failed: ${err}`);
+		}
 	}
 
 	async rebuildIndex(): Promise<void> {
@@ -109,19 +130,20 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 		return [];
 	}
 
-	async indexFile(uri: URI, text: string, languageId: string, skipIndexUpdate?: boolean): Promise<number> {
+	async indexFile(uri: URI, text: string, languageId: string, skipIndexUpdate?: boolean, mtime?: number): Promise<number> {
 		if (!(await this.checkConnectivity())) {
 			return 0;
 		}
 
-		const backendUrl = 'http://127.0.0.1:3000/embeddings/index-file';
+		const backendUrl = `${this.backendUrl}/embeddings/index-file`;
 		try {
 			const response = await this.aiService.request(backendUrl, {
 				projectId: 'default_project',
 				uri: uri.toString(),
 				text,
 				languageId,
-				skipIndexUpdate
+				skipIndexUpdate,
+				mtime: mtime || 0
 			}, CancellationToken.None) as { count: number };
 			return response.count || 0;
 		} catch (err) {
@@ -137,7 +159,7 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 			return [];
 		}
 
-		const backendUrl = 'http://127.0.0.1:3000/search';
+		const backendUrl = `${this.backendUrl}/search`;
 		try {
 			const response = await this.aiService.request(backendUrl, {
 				projectId: 'default_project',
@@ -161,8 +183,21 @@ export class VectorStoreServiceClient extends Disposable implements IVectorStore
 	}
 
 	async getFileMtimes(): Promise<[string, number][]> {
-		// Mocked for now to ensure indexing always runs in Phase 8 verification
-		return [];
+		if (!(await this.checkConnectivity())) {
+			return [];
+		}
+
+		const backendUrl = `${this.backendUrl}/embeddings/mtimes`;
+		try {
+			const response = await this.aiService.request(backendUrl, {
+				projectId: 'default_project'
+			}, CancellationToken.None) as { mtimes: [string, number][] };
+			return response.mtimes || [];
+		} catch (err) {
+			this.backendAvailable = false;
+			this.logService.error(`VectorStoreServiceClient: getFileMtimes failed: ${err}`);
+			return [];
+		}
 	}
 
 	async close(): Promise<void> {

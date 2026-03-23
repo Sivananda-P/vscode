@@ -20,13 +20,19 @@ export class SkillService {
 		try {
 			const skillDirs = await fs.readdir(this.skillsPath);
 			for (const dir of skillDirs) {
-				const skillFile = path.join(this.skillsPath, dir, 'SKILL.md');
+				const fullPath = path.join(this.skillsPath, dir);
+				const stat = await fs.stat(fullPath);
+				if (!stat.isDirectory()) {
+					continue;
+				}
+
+				const skillFile = path.join(fullPath, 'SKILL.md');
 				try {
 					const content = await fs.readFile(skillFile, 'utf8');
 					// Simplistic frontmatter parsing
 					const nameMatch = content.match(/name:\s*(.*)/);
 					const descMatch = content.match(/description:\s*(.*)/);
-					
+
 					if (nameMatch) {
 						const name = nameMatch[1].trim();
 						this.skills.set(name.toLowerCase(), {
@@ -35,8 +41,10 @@ export class SkillService {
 							content: content
 						});
 					}
-				} catch (err) {
-					console.error(`Error loading skill from ${skillFile}:`, err);
+				} catch (err: any) {
+					if (err.code !== 'ENOENT') {
+						console.error(`Error loading skill from ${skillFile}:`, err);
+					}
 				}
 			}
 			console.log(`[SkillService] Loaded ${this.skills.size} skills.`);
@@ -57,7 +65,7 @@ export class SkillService {
 		if (!skillName) {
 			return '';
 		}
-		
+
 		const skill = this.getSkill(skillName);
 		if (!skill) {
 			return '';

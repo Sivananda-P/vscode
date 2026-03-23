@@ -45,6 +45,7 @@ import { getDefinitionsAtPosition } from '../../../../../editor/contrib/gotoSymb
 import { Position } from '../../../../../editor/common/core/position.js';
 import { Range } from '../../../../../editor/common/core/range.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { localize } from '../../../../../nls.js';
 
 interface IToolCall {
@@ -161,17 +162,23 @@ export class CustomAgent
 		private readonly languageFeaturesService: ILanguageFeaturesService,
 		@IModelService private readonly modelService: IModelService,
 		@IEditorService private readonly editorService: IEditorService,
+		@IConfigurationService private readonly configurationService: IConfigurationService
 	) {
 		super();
 		this.fetchAndRegisterSkills();
 	}
 
+	private get backendUrl(): string {
+		const url = this.configurationService.getValue<string>('cogniai.backendUrl') || 'http://localhost:3000';
+		return url.endsWith('/') ? url.slice(0, -1) : url;
+	}
+
 	private async fetchAndRegisterSkills() {
 		try {
-			const json = await this.aiService.request('http://127.0.0.1:3000/ai/skills', {}, CancellationToken.None) as { skills: SkillInfo[] };
+			const json = await this.aiService.request(`${this.backendUrl}/ai/skills`, {}, CancellationToken.None) as { skills: SkillInfo[] };
 			const skills = json.skills || [];
 			const existingNames = new Set(this.dynamicSlashCommands.map(c => c.name));
-			
+
 			for (const skill of skills) {
 				const commandName = skill.name.toLowerCase();
 				if (!existingNames.has(commandName)) {
@@ -225,7 +232,7 @@ export class CustomAgent
 				}
 			}
 
-			const backendUrl = 'http://127.0.0.1:3000/ai/query';
+			const backendUrl = `${this.backendUrl}/ai/query`;
 			let prompt = request.message.trim();
 
 			while (turnCount < MAX_TURNS && !token.isCancellationRequested) {
@@ -248,13 +255,13 @@ export class CustomAgent
 					return {};
 				} else if (prompt.startsWith('/available-skills')) {
 					try {
-						const json = await this.aiService.request('http://127.0.0.1:3000/ai/skills', {}, token) as { skills: SkillInfo[] };
+						const json = await this.aiService.request(`${this.backendUrl}/ai/skills`, {}, token) as { skills: SkillInfo[] };
 						const skills = json.skills || [];
-						let skillList = localize('chat.customAgent.availableSkills', "### 🌟 Available Specialized Skills\n\n");
-						
+						let skillList = localize('chat.customAgent.availableSkills', "### Available Specialized Skills\n\n");
+
 						// Featured ones first
 						const featured = ['brainstorming', 'systematic-debugging', 'git-pushing', 'test-driven-development', 'react-best-practices', 'senior-fullstack', 'code-reviewer', 'webapp-testing'];
-						
+
 						skillList += localize('chat.customAgent.featuredHeader', "**Featured Skills:**\n");
 						featured.forEach(f => {
 							const s = skills.find((sk: SkillInfo) => sk.name.toLowerCase() === f);
@@ -529,7 +536,7 @@ export class CustomAgent
 		query: string,
 		k: number = 5,
 	): Promise<ISearchResult[]> {
-		const searchUrl = 'http://127.0.0.1:3000/search';
+		const searchUrl = `${this.backendUrl}/search`;
 		try {
 			const json = await this.aiService.request(
 				searchUrl,
@@ -751,7 +758,7 @@ export class CustomAgent
 		// Delegate terminal execution to the backend server which runs in Node.js
 		try {
 			const json = (await this.aiService.request(
-				'http://127.0.0.1:3000/terminal/run',
+				`${this.backendUrl}/terminal/run`,
 				{
 					command,
 				},
