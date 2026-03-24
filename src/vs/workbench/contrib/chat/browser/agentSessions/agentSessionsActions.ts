@@ -989,6 +989,18 @@ export class ToggleAgentSessionsSidebar extends Action2 {
 			precondition: ChatContextKeys.enabled,
 			f1: true,
 			category: AGENT_SESSIONS_CATEGORY,
+			icon: Codicon.history,
+			menu: [
+				{
+					id: MenuId.ViewTitle,
+					when: ContextKeyExpr.and(
+						ContextKeyExpr.equals('view', ChatViewId),
+						ContextKeyExpr.equals(`config.${ChatConfiguration.ChatViewSessionsEnabled}`, true)
+					),
+					group: 'navigation',
+					order: 2
+				}
+			]
 		});
 	}
 
