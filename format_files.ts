@@ -27,12 +27,7 @@ function formatFile(filePath: string) {
 }
 
 const files = [
-	"src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsPicker.ts",
-	"src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsViewer.ts",
-	"src/vs/workbench/contrib/chat/browser/agentSessions/agentSessions.ts",
-	"src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsActions.ts",
-	"src/vs/workbench/contrib/chat/browser/actions/chatActions.ts",
-	"src/vs/workbench/contrib/chat/browser/actions/chatNewActions.ts",
+	'src/vs/workbench/contrib/chat/browser/chatSetup/customAgent.ts'
 ];
 
 files.forEach(formatFile);
