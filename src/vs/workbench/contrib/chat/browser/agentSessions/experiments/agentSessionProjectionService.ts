@@ -220,7 +220,7 @@ export class AgentSessionProjectionService extends Disposable implements IAgentS
 						original: { resource: dr.originalUri },
 						modified: { resource: dr.modifiedUri }
 					})),
-					label: localize('agentSessionProjection.changes.title', '{0} - All Changes', session.label),
+					label: localize('agentSessionProjection.changes.title', "{0} - All Changes", session.label),
 				}, MODAL_GROUP);
 
 				this.logService.trace(`[AgentSessionProjection] Multi-diff editor opened successfully in modal view`);

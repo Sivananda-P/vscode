@@ -10,6 +10,7 @@ import { AiService } from './services/ai.service';
 import { VectorService } from './services/vector.service';
 import { AstService } from './services/ast.service';
 import { SkillService } from './services/skill.service';
+import { HistoryService } from './services/history.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -253,6 +254,75 @@ app.post('/terminal/run', async (req: Request, res: Response) => {
 			stderr: e.stderr || e.message || String(err),
 			exitCode: e.code || 1
 		});
+	}
+});
+
+// --- History Management Endpoints ---
+
+/**
+ * POST /history/fetch/:projectId
+ * Returns all chat sessions for a project.
+ */
+app.post('/history/fetch/:projectId', async (req: Request, res: Response) => {
+	const projectId = req.params.projectId as string;
+	try {
+		console.log(`[History] Fetching history for project: ${projectId}`);
+		const sessions = await HistoryService.getSessions(projectId);
+		res.json({ sessions });
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		res.status(500).json({ error: message });
+	}
+});
+
+/**
+ * POST /history/save
+ * Saves or updates a chat session.
+ */
+app.post('/history/save', async (req: Request, res: Response) => {
+	const { id, projectId, label, messages, timestamp } = req.body;
+	try {
+		await HistoryService.saveSession({
+			id,
+			projectId: projectId || 'default_project',
+			label: label || 'Untitled Chat',
+			messages: messages || [],
+			timestamp: timestamp || Date.now()
+		});
+		res.json({ success: true });
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		res.status(500).json({ error: message });
+	}
+});
+
+/**
+ * DELETE /history/:id
+ * Deletes a chat session.
+ */
+app.delete('/history/:id', async (req: Request, res: Response) => {
+	const id = req.params.id as string;
+	try {
+		await HistoryService.deleteSession(id);
+		res.json({ success: true });
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		res.status(500).json({ error: message });
+	}
+});
+
+/**
+ * DELETE /history/clear/:projectId
+ * Clears all history for a project.
+ */
+app.delete('/history/clear/:projectId', async (req: Request, res: Response) => {
+	const projectId = req.params.projectId as string;
+	try {
+		await HistoryService.clearHistory(projectId);
+		res.json({ success: true });
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		res.status(500).json({ error: message });
 	}
 });
 

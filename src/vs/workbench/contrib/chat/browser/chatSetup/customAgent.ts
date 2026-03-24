@@ -99,24 +99,102 @@ export class CustomAgent
 		const dynamicSlashCommands: IChatAgentCommand[] = [
 			{
 				name: 'explain',
-				description: localize('chat.customAgent.explain', "Explain how the current code works."),
+				description: localize(
+					'chat.customAgent.explain',
+					"Explain how the current code works.",
+				),
 			},
 			{
 				name: 'fix',
-				description: localize('chat.customAgent.fix', "Propose a fix for the problems in the current file."),
+				description: localize(
+					'chat.customAgent.fix',
+					"Propose a fix for the problems in the current file.",
+				),
 			},
-			{ name: 'clear', description: localize('chat.customAgent.clear', "Clear the chat history.") },
-			{ name: '3danim', description: localize('chat.customAgent.run3dAnim', "3D Animation Assistant") },
-			{ name: 'design', description: localize('chat.customAgent.runFrontendDesign', "Frontend Design Assistant") },
-			{ name: 'brainstorming', description: localize('chat.customAgent.runBrainstorming', "Brainstorming Assistant") },
-			{ name: 'debugging', description: localize('chat.customAgent.runDebugging', "Systematic Debugging Assistant") },
-			{ name: 'gitpush', description: localize('chat.customAgent.runGitPush', "Git Pushing Assistant") },
-			{ name: 'tdd', description: localize('chat.customAgent.runTDD', "Test-Driven Development Assistant") },
-			{ name: 'react', description: localize('chat.customAgent.runReact', "React Best Practices Assistant") },
-			{ name: 'fullstack', description: localize('chat.customAgent.runFullstack', "Senior Fullstack Engineer") },
-			{ name: 'review', description: localize('chat.customAgent.runReview', "Professional Code Reviewer") },
-			{ name: 'testing', description: localize('chat.customAgent.runTesting', "WebApp Testing Assistant") },
-			{ name: 'available-skills', description: localize('chat.customAgent.listSkills', "List all available specialized skills.") },
+			{
+				name: 'clear',
+				description: localize(
+					'chat.customAgent.clear',
+					"Clear the chat history.",
+				),
+			},
+			{
+				name: '3danim',
+				description: localize(
+					'chat.customAgent.run3dAnim',
+					"3D Animation Assistant",
+				),
+			},
+			{
+				name: 'design',
+				description: localize(
+					'chat.customAgent.runFrontendDesign',
+					"Frontend Design Assistant",
+				),
+			},
+			{
+				name: 'brainstorming',
+				description: localize(
+					'chat.customAgent.runBrainstorming',
+					"Brainstorming Assistant",
+				),
+			},
+			{
+				name: 'debugging',
+				description: localize(
+					'chat.customAgent.runDebugging',
+					"Systematic Debugging Assistant",
+				),
+			},
+			{
+				name: 'gitpush',
+				description: localize(
+					'chat.customAgent.runGitPush',
+					"Git Pushing Assistant",
+				),
+			},
+			{
+				name: 'tdd',
+				description: localize(
+					'chat.customAgent.runTDD',
+					"Test-Driven Development Assistant",
+				),
+			},
+			{
+				name: 'react',
+				description: localize(
+					'chat.customAgent.runReact',
+					"React Best Practices Assistant",
+				),
+			},
+			{
+				name: 'fullstack',
+				description: localize(
+					'chat.customAgent.runFullstack',
+					"Senior Fullstack Engineer",
+				),
+			},
+			{
+				name: 'review',
+				description: localize(
+					'chat.customAgent.runReview',
+					"Professional Code Reviewer",
+				),
+			},
+			{
+				name: 'testing',
+				description: localize(
+					'chat.customAgent.runTesting',
+					"WebApp Testing Assistant",
+				),
+			},
+			{
+				name: 'available-skills',
+				description: localize(
+					'chat.customAgent.listSkills',
+					"List all available specialized skills.",
+				),
+			},
 		];
 
 		disposables.add(
@@ -129,7 +207,10 @@ export class CustomAgent
 				slashCommands: dynamicSlashCommands,
 				disambiguation: [],
 				locations: [location],
-				description: localize('chat.customAgent.poweredBy', "Powered by CogniAI Professional."),
+				description: localize(
+					'chat.customAgent.poweredBy',
+					"Powered by CogniAI Professional.",
+				),
 				metadata: {
 					themeIcon: { id: 'sparkle' },
 				},
@@ -162,29 +243,44 @@ export class CustomAgent
 		private readonly languageFeaturesService: ILanguageFeaturesService,
 		@IModelService private readonly modelService: IModelService,
 		@IEditorService private readonly editorService: IEditorService,
-		@IConfigurationService private readonly configurationService: IConfigurationService
+		@IConfigurationService
+		private readonly configurationService: IConfigurationService,
 	) {
 		super();
 		this.fetchAndRegisterSkills();
 	}
 
 	private get backendUrl(): string {
-		const url = this.configurationService.getValue<string>('cogniai.backendUrl') || 'http://localhost:3000';
+		const url =
+			this.configurationService.getValue<string>('cogniai.backendUrl') ||
+			'http://localhost:3000';
 		return url.endsWith('/') ? url.slice(0, -1) : url;
 	}
 
 	private async fetchAndRegisterSkills() {
 		try {
-			const json = await this.aiService.request(`${this.backendUrl}/ai/skills`, {}, CancellationToken.None) as { skills: SkillInfo[] };
+			const json = (await this.aiService.request(
+				`${this.backendUrl}/ai/skills`,
+				{},
+				CancellationToken.None,
+			)) as { skills: SkillInfo[] };
 			const skills = json.skills || [];
-			const existingNames = new Set(this.dynamicSlashCommands.map(c => c.name));
+			const existingNames = new Set(
+				this.dynamicSlashCommands.map((c) => c.name),
+			);
 
 			for (const skill of skills) {
 				const commandName = skill.name.toLowerCase();
 				if (!existingNames.has(commandName)) {
 					this.dynamicSlashCommands.push({
 						name: commandName,
-						description: skill.description || localize('chat.customAgent.skillDesc', "Specialized skill: {0}", skill.name)
+						description:
+							skill.description ||
+							localize(
+								'chat.customAgent.skillDesc',
+								"Specialized skill: {0}",
+								skill.name,
+							),
 					});
 					existingNames.add(commandName);
 				}
@@ -225,7 +321,7 @@ export class CustomAgent
 						return '';
 					})
 					.filter(Boolean)
-					.join('\n');
+					.join("\n");
 
 				if (assistantContent) {
 					messages.push({ role: 'assistant', content: assistantContent });
@@ -249,41 +345,94 @@ export class CustomAgent
 					progress([
 						{
 							kind: 'markdownContent',
-							content: new MarkdownString(localize('chat.customAgent.historyCleared', "Chat history cleared.")),
+							content: new MarkdownString(
+								localize(
+									'chat.customAgent.historyCleared',
+									"Chat history cleared.",
+								),
+							),
 						},
 					]);
 					return {};
 				} else if (prompt.startsWith('/available-skills')) {
 					try {
-						const json = await this.aiService.request(`${this.backendUrl}/ai/skills`, {}, token) as { skills: SkillInfo[] };
+						const json = (await this.aiService.request(
+							`${this.backendUrl}/ai/skills`,
+							{},
+							token,
+						)) as { skills: SkillInfo[] };
 						const skills = json.skills || [];
-						let skillList = localize('chat.customAgent.availableSkills', "### Available Specialized Skills\n\n");
+						let skillList = localize(
+							'chat.customAgent.availableSkills',
+							"### Available Specialized Skills\n\n",
+						);
 
 						// Featured ones first
-						const featured = ['brainstorming', 'systematic-debugging', 'git-pushing', 'test-driven-development', 'react-best-practices', 'senior-fullstack', 'code-reviewer', 'webapp-testing'];
+						const featured = [
+							'brainstorming',
+							'systematic-debugging',
+							'git-pushing',
+							'test-driven-development',
+							'react-best-practices',
+							'senior-fullstack',
+							'code-reviewer',
+							'webapp-testing',
+						];
 
-						skillList += localize('chat.customAgent.featuredHeader', "**Featured Skills:**\n");
-						featured.forEach(f => {
-							const s = skills.find((sk: SkillInfo) => sk.name.toLowerCase() === f);
+						skillList += localize(
+							'chat.customAgent.featuredHeader',
+							"**Featured Skills:**\n",
+						);
+						featured.forEach((f) => {
+							const s = skills.find(
+								(sk: SkillInfo) => sk.name.toLowerCase() === f,
+							);
 							if (s) {
 								skillList += `- **/${f}**: ${s.description}\n`;
 							}
 						});
 
-						skillList += localize('chat.customAgent.moreSkillsHeader', "\n**More Skills (Partial List):**\n");
-						const otherSkills = skills.filter((sk: SkillInfo) => !featured.includes(sk.name.toLowerCase())).slice(0, 15);
+						skillList += localize(
+							'chat.customAgent.moreSkillsHeader',
+							"\n**More Skills (Partial List):**\n",
+						);
+						const otherSkills = skills
+							.filter(
+								(sk: SkillInfo) => !featured.includes(sk.name.toLowerCase()),
+							)
+							.slice(0, 15);
 						otherSkills.forEach((s: SkillInfo) => {
 							skillList += `- **/${s.name.toLowerCase()}**: ${s.description}\n`;
 						});
 
-						if (skills.length > (featured.length + otherSkills.length)) {
-							skillList += localize('chat.customAgent.totalSkillsHint', "\n... and {0} more! Try typing `/` followed by any skill name.", skills.length - featured.length - otherSkills.length);
+						if (skills.length > featured.length + otherSkills.length) {
+							skillList += localize(
+								'chat.customAgent.totalSkillsHint',
+								"\n... and {0} more! Try typing `/` followed by any skill name.",
+								skills.length - featured.length - otherSkills.length,
+							);
 						}
 
-						progress([{ kind: 'markdownContent', content: new MarkdownString(skillList) }]);
+						progress([
+							{
+								kind: 'markdownContent',
+								content: new MarkdownString(skillList),
+							},
+						]);
 						return {};
 					} catch (e) {
-						progress([{ kind: 'markdownContent', content: new MarkdownString(localize('chat.customAgent.skillsLoadError', "Error loading skills: {0}", String(e))) }]);
+						progress([
+							{
+								kind: 'markdownContent',
+								content: new MarkdownString(
+									localize(
+										'chat.customAgent.skillsLoadError',
+										"Error loading skills: {0}",
+										String(e),
+									),
+								),
+							},
+						]);
 						return {};
 					}
 				}
@@ -324,11 +473,26 @@ export class CustomAgent
 					if (skillMatch) {
 						const skillCandidate = skillMatch[1].toLowerCase();
 						const reserved = [
-							'explain', 'fix', 'clear', 'available-skills',
-							'hooks', 'models', 'tools', 'plugins', 'debug',
-							'agents', 'skills', 'instructions', 'prompts',
-							'fork', 'rename', 'autoapprove', 'disableautoapprove',
-							'yolo', 'disableyolo', 'help'
+							'explain',
+							'fix',
+							'clear',
+							'available-skills',
+							'hooks',
+							'models',
+							'tools',
+							'plugins',
+							'debug',
+							'agents',
+							'skills',
+							'instructions',
+							'prompts',
+							'fork',
+							'rename',
+							'autoapprove',
+							'disableautoapprove',
+							'yolo',
+							'disableyolo',
+							'help',
 						];
 						if (!reserved.includes(skillCandidate)) {
 							activeSkill = skillCandidate;
@@ -399,7 +563,13 @@ export class CustomAgent
 					progress([
 						{
 							kind: 'progressMessage',
-							content: new MarkdownString(localize('chat.customAgent.executingTool', "Agent executing `{0}`...", name)),
+							content: new MarkdownString(
+								localize(
+									'chat.customAgent.executingTool',
+									"Agent executing `{0}`...",
+									name,
+								),
+							),
 						},
 					]);
 
@@ -441,10 +611,18 @@ export class CustomAgent
 								result = await this.runTerminal(args.command);
 								break;
 							default:
-								result = localize('chat.customAgent.unknownTool', "Error: Unknown tool {0}", name);
+								result = localize(
+									'chat.customAgent.unknownTool',
+									"Error: Unknown tool {0}",
+									name,
+								);
 						}
 					} catch (err) {
-						result = localize('chat.customAgent.toolError', "Error executing tool: {0}", err);
+						result = localize(
+							'chat.customAgent.toolError',
+							"Error executing tool: {0}",
+							err,
+						);
 					}
 
 					messages.push({
@@ -461,7 +639,11 @@ export class CustomAgent
 				{
 					kind: 'markdownContent',
 					content: new MarkdownString(
-						localize('chat.customAgent.errorConnecting', "Error connecting to backend: {0}", (e instanceof Error ? e.message : String(e))),
+						localize(
+							'chat.customAgent.errorConnecting',
+							"Error connecting to backend: {0}",
+							e instanceof Error ? e.message : String(e),
+						),
 					),
 				},
 			]);
@@ -474,7 +656,10 @@ export class CustomAgent
 		const workspaceRoot =
 			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceRoot) {
-			return localize('chat.customAgent.noWorkspaceRoot', "Error: No workspace root found.");
+			return localize(
+				'chat.customAgent.noWorkspaceRoot',
+				"Error: No workspace root found.",
+			);
 		}
 		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
 		const content = await this.fileService.readFile(fileUri);
@@ -489,7 +674,10 @@ export class CustomAgent
 		const workspaceRoot =
 			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceRoot) {
-			return localize('chat.customAgent.noWorkspaceRoot', "Error: No workspace root found.");
+			return localize(
+				'chat.customAgent.noWorkspaceRoot',
+				"Error: No workspace root found.",
+			);
 		}
 		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
 
@@ -497,7 +685,7 @@ export class CustomAgent
 		let existingLines: string[] = [];
 		try {
 			const existing = await this.fileService.readFile(fileUri);
-			existingLines = existing.value.toString().split('\n');
+			existingLines = existing.value.toString().split("\n");
 		} catch {
 			// New file — no existing content
 		}
@@ -507,7 +695,7 @@ export class CustomAgent
 
 		// Emit textEdit progress so VS Code shows Accept/Reject in editor toolbar
 		if (progress) {
-			const newLines = content.split('\n');
+			const newLines = content.split("\n");
 			const endLine = Math.max(existingLines.length, newLines.length);
 			progress([
 				{
@@ -529,7 +717,11 @@ export class CustomAgent
 			]);
 		}
 
-		return localize('chat.customAgent.successWrite', "Successfully wrote {0}", relativePath);
+		return localize(
+			'chat.customAgent.successWrite',
+			"Successfully wrote {0}",
+			relativePath,
+		);
 	}
 
 	private async semanticSearch(
@@ -570,8 +762,8 @@ export class CustomAgent
 	): Promise<string> {
 		try {
 			const original = await this.readFile(relativePath);
-			const originalLines = original.split('\n');
-			const patchLines = patch.split('\n');
+			const originalLines = original.split("\n");
+			const patchLines = patch.split("\n");
 
 			// Check if this is a unified diff or raw content
 			const isUnifiedDiff = patchLines.some(
@@ -581,7 +773,11 @@ export class CustomAgent
 			if (!isUnifiedDiff) {
 				// Fallback: If AI just sent a block of code, overwrite the file (safer than mangling)
 				await this.writeFile(relativePath, patch, progress);
-				return localize('chat.customAgent.updatedContent', "Updated {0} with new content.", relativePath);
+				return localize(
+					'chat.customAgent.updatedContent',
+					"Updated {0} with new content.",
+					relativePath,
+				);
 			}
 
 			const resultLines: string[] = [...originalLines];
@@ -622,14 +818,22 @@ export class CustomAgent
 				i++;
 			}
 
-			const finalContent = resultLines.join('\n');
+			const finalContent = resultLines.join("\n");
 			await this.writeFile(relativePath, finalContent, progress);
-			return localize('chat.customAgent.patchSuccess', "Successfully applied professional patch to {0}", relativePath);
+			return localize(
+				'chat.customAgent.patchSuccess',
+				"Successfully applied professional patch to {0}",
+				relativePath,
+			);
 		} catch (err) {
 			// Fail-safe: if patching fails, try to write the raw patch as full content if it looks valid
 			if (patch.length > 50) {
 				await this.writeFile(relativePath, patch, progress);
-				return localize('chat.customAgent.patchFullOverwrite', "Patch execution failed, performed full overwrite for safety to {0}", relativePath);
+				return localize(
+					'chat.customAgent.patchFullOverwrite',
+					"Patch execution failed, performed full overwrite for safety to {0}",
+					relativePath,
+				);
 			}
 			throw err;
 		}
@@ -662,22 +866,36 @@ export class CustomAgent
 		const workspaceRoot =
 			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceRoot) {
-			return localize('chat.customAgent.noWorkspaceRoot', "Error: No workspace root found.");
+			return localize(
+				'chat.customAgent.noWorkspaceRoot',
+				"Error: No workspace root found.",
+			);
 		}
 		const folderUri = joinWorkspacePath(workspaceRoot, relativePath);
 		await this.fileService.createFolder(folderUri);
-		return localize('chat.customAgent.createdFolder', "Created folder {0}", relativePath);
+		return localize(
+			'chat.customAgent.createdFolder',
+			"Created folder {0}",
+			relativePath,
+		);
 	}
 
 	private async deleteFile(relativePath: string): Promise<string> {
 		const workspaceRoot =
 			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceRoot) {
-			return localize('chat.customAgent.noWorkspaceRoot', "Error: No workspace root found.");
+			return localize(
+				'chat.customAgent.noWorkspaceRoot',
+				"Error: No workspace root found.",
+			);
 		}
 		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
 		await this.fileService.del(fileUri, { recursive: true });
-		return localize('chat.customAgent.deletedFile', "Deleted {0}", relativePath);
+		return localize(
+			'chat.customAgent.deletedFile',
+			"Deleted {0}",
+			relativePath,
+		);
 	}
 
 	private async listDir(
@@ -710,12 +928,15 @@ export class CustomAgent
 		const workspaceRoot =
 			this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		if (!workspaceRoot) {
-			return localize('chat.customAgent.noWorkspaceRoot', "Error: No workspace root found.");
+			return localize(
+				'chat.customAgent.noWorkspaceRoot',
+				"Error: No workspace root found.",
+			);
 		}
 
 		const fileUri = joinWorkspacePath(workspaceRoot, relativePath);
 		const content = await this.readFile(relativePath);
-		const lines = content.split('\n');
+		const lines = content.split("\n");
 
 		let position: Position | undefined;
 		for (let i = 0; i < lines.length; i++) {
@@ -727,12 +948,19 @@ export class CustomAgent
 		}
 
 		if (!position) {
-			return localize('chat.customAgent.symbolNotFound', "Error: Could not find symbol \"{0}\" in {1}", symbol, relativePath);
+			return localize(
+				'chat.customAgent.symbolNotFound',
+				"Error: Could find symbol \"{0}\' in {1}', symbol, relativePath",
+			);
 		}
 
 		const model = this.modelService.getModel(fileUri);
 		if (!model) {
-			return localize('chat.customAgent.modelLoadError', "Error: Could not load model for {0}", relativePath);
+			return localize(
+				'chat.customAgent.modelLoadError',
+				"Error: Could not load model for {0}",
+				relativePath,
+			);
 		}
 
 		const definitions = await getDefinitionsAtPosition(
@@ -743,7 +971,11 @@ export class CustomAgent
 			CancellationToken.None,
 		);
 		if (definitions.length === 0) {
-			return localize('chat.customAgent.noDefinitions', "No definitions found for {0}", symbol);
+			return localize(
+				'chat.customAgent.noDefinitions',
+				"No definitions found for {0}",
+				symbol,
+			);
 		}
 
 		const results = definitions.map((d) => {
@@ -751,7 +983,12 @@ export class CustomAgent
 			return `${d.uri.fsPath}:${range.startLineNumber}:${range.startColumn}`;
 		});
 
-		return localize('chat.customAgent.definitionsFound', "Found {0} definitions:\n{1}", definitions.length, results.join('\n'));
+		return localize(
+			'chat.customAgent.definitionsFound',
+			"Found {0} definitions:\n{1}",
+			definitions.length,
+			results.join("\n"),
+		);
 	}
 
 	private async runTerminal(command: string): Promise<string> {
@@ -764,10 +1001,20 @@ export class CustomAgent
 				},
 				CancellationToken.None,
 			)) as { stdout: string; stderr: string; exitCode: number };
-			const output = [json.stdout, json.stderr].filter(Boolean).join('\n');
-			return localize('chat.customAgent.terminalOutput', "Exit code: {0}\n{1}", json.exitCode, output || localize('chat.customAgent.noOutput', "(no output)"));
+			const output = [json.stdout, json.stderr].filter(Boolean).join("\n");
+			return localize(
+				'chat.customAgent.terminalOutput',
+				"Exit code: {0}\n{1}",
+				json.exitCode,
+				output || localize('chat.customAgent.noOutput', "(no output)"),
+			);
 		} catch (err) {
-			return localize('chat.customAgent.terminalError', "Terminal tool not yet connected to backend. Command requested: {0}\nError: {1}", command, err);
+			return localize(
+				'chat.customAgent.terminalError',
+				"Terminal tool not yet connected to backend. Command requested: {0}\nError: {1}",
+				command,
+				err,
+			);
 		}
 	}
 }

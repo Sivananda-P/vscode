@@ -96,7 +96,7 @@ export class ToggleAgentStatusAction extends ToggleTitleBarConfigAction {
 	constructor() {
 		super(
 			ChatConfiguration.AgentStatusEnabled,
-			localize('toggle.agentStatus', 'Agent Status'),
+			localize('toggle.agentStatus', "Agent Status"),
 			localize('toggle.agentStatusDescription', "Toggle visibility of the Agent Status in title bar"), 6,
 			ContextKeyExpr.and(
 				ChatContextKeys.enabled,
@@ -116,7 +116,7 @@ export class ToggleUnifiedAgentsBarAction extends ToggleTitleBarConfigAction {
 	constructor() {
 		super(
 			ChatConfiguration.UnifiedAgentsBar,
-			localize('toggle.agentQuickInput', 'Agent Quick Input'),
+			localize('toggle.agentQuickInput', "Agent Quick Input"),
 			localize('toggle.agentQuickInputDescription', "Toggle Agent Quick Input, replacing the classic command center search box."), 7,
 			ContextKeyExpr.and(
 				ChatContextKeys.enabled,

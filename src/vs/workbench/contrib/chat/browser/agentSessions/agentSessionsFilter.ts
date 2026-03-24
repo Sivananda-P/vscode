@@ -236,7 +236,7 @@ export class AgentSessionsFilter extends Disposable implements Required<IAgentSe
 			constructor() {
 				super({
 					id: `agentSessions.filter.toggleExcludeArchived.${menuId.id.toLowerCase()}`,
-					title: localize('agentSessions.filter.archived', 'Archived'),
+					title: localize('agentSessions.filter.archived', "Archived"),
 					menu: {
 						id: menuId,
 						group: '3_props',
@@ -257,7 +257,7 @@ export class AgentSessionsFilter extends Disposable implements Required<IAgentSe
 			constructor() {
 				super({
 					id: `agentSessions.filter.toggleExcludeRead.${menuId.id.toLowerCase()}`,
-					title: localize('agentSessions.filter.read', 'Read'),
+					title: localize('agentSessions.filter.read', "Read"),
 					menu: {
 						id: menuId,
 						group: '3_props',
