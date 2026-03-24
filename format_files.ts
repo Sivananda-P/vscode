@@ -27,7 +27,7 @@ function formatFile(filePath: string) {
 }
 
 const files = [
-	'src/vs/workbench/contrib/chat/browser/chatSetup/customAgent.ts'
+	'src/vs/workbench/contrib/chat/browser/agentSessions/agentSessionsActions.ts'
 ];
 
 files.forEach(formatFile);
