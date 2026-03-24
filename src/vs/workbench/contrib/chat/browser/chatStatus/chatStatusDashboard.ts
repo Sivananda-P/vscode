@@ -171,7 +171,7 @@ export class ChatStatusDashboard extends DomWidget {
 			const usageTitle = this.getUsageTitle();
 			addSeparator(usageTitle, toAction({
 				id: 'workbench.action.manageCopilot',
-				label: localize('quotaLabel', "Manage Chat"),
+				label: localize('quotaLabel', "Manage CogniAI"),
 				tooltip: localize('quotaTooltip', "Manage Chat"),
 				class: ThemeIcon.asClassName(Codicon.settings),
 				run: () => this.runCommandAndClose(() => this.openerService.open(URI.parse(defaultChat.manageSettingsUrl))),
@@ -188,7 +188,7 @@ export class ChatStatusDashboard extends DomWidget {
 
 			if (this.chatEntitlementService.entitlement === ChatEntitlement.Free && (Number(chatQuota?.percentRemaining) <= 25 || Number(completionsQuota?.percentRemaining) <= 25)) {
 				const upgradeProButton = this._store.add(new Button(this.element, { ...defaultButtonStyles, hoverDelegate: nativeHoverDelegate, secondary: this.canUseChat() /* use secondary color when chat can still be used */ }));
-				upgradeProButton.label = localize('upgradeToCopilotPro', "Upgrade to GitHub Copilot Pro");
+				upgradeProButton.label = localize('upgradeToCopilotPro', "Upgrade to CogniAI Pro");
 				this._store.add(upgradeProButton.onDidClick(() => this.runCommandAndClose('workbench.action.chat.upgradePlan')));
 			}
 
@@ -213,7 +213,7 @@ export class ChatStatusDashboard extends DomWidget {
 
 		// Anonymous Indicator
 		else if (this.chatEntitlementService.anonymous && this.chatEntitlementService.sentiment.installed) {
-			addSeparator(localize('anonymousTitle', "Copilot Usage"));
+			addSeparator(localize('anonymousTitle', "CogniAI Usage"));
 
 			this.createQuotaIndicator(this.element, this._store, localize('quotaLimited', "Limited"), localize('completionsLabel', "Inline Suggestions"), false);
 			this.createQuotaIndicator(this.element, this._store, localize('quotaLimited', "Limited"), localize('chatsLabel', "Chat messages"), false);
@@ -359,16 +359,16 @@ export class ChatStatusDashboard extends DomWidget {
 				let descriptionText: string | MarkdownString;
 				let descriptionClass = '.description';
 				if (newUser && anonymousUser) {
-					descriptionText = new MarkdownString(localize({ key: 'activeDescriptionAnonymous', comment: ['{Locked="]({2})"}', '{Locked="]({3})"}'] }, "By continuing with {0} Copilot, you agree to {1}'s [Terms]({2}) and [Privacy Statement]({3})", defaultChat.provider.default.name, defaultChat.provider.default.name, defaultChat.termsStatementUrl, defaultChat.privacyStatementUrl), { isTrusted: true });
+					descriptionText = new MarkdownString(localize({ key: 'activeDescriptionAnonymous', comment: ['{Locked="]({2})"}', '{Locked="]({3})"}'] }, "By continuing with {0} CogniAI, you agree to {1}'s [Terms]({2}) and [Privacy Statement]({3})", defaultChat.provider.default.name, defaultChat.provider.default.name, defaultChat.termsStatementUrl, defaultChat.privacyStatementUrl), { isTrusted: true });
 					descriptionClass = `${descriptionClass}.terms`;
 				} else if (newUser) {
-					descriptionText = localize('activateDescription', "Set up Copilot to use AI features.");
+					descriptionText = localize('activateDescription', "Set up CogniAI to use AI features.");
 				} else if (anonymousUser) {
-					descriptionText = localize('enableMoreDescription', "Sign in to enable more Copilot AI features.");
+					descriptionText = localize('enableMoreDescription', "Sign in to enable more CogniAI AI features.");
 				} else if (disabled) {
-					descriptionText = localize('enableDescription', "Enable Copilot to use AI features.");
+					descriptionText = localize('enableDescription', "Enable CogniAI to use AI features.");
 				} else {
-					descriptionText = localize('signInDescription', "Sign in to use Copilot AI features.");
+					descriptionText = localize('signInDescription', "Sign in to use CogniAI AI features.");
 				}
 
 				let buttonLabel: string;

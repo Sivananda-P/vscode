@@ -139,7 +139,7 @@ export function registerNewChatActions() {
 	);
 
 	const iconVariants = [
-		{ idSuffix: '.copilotIcon', iconValue: 'copilot', icon: Codicon.copilot },
+		{ idSuffix: '.copilotIcon', iconValue: 'copilot', icon: Codicon.sparkle },
 		{ idSuffix: '.newSessionIcon', iconValue: 'new-session', icon: Codicon.newSession },
 		{ idSuffix: '.commentIcon', iconValue: 'comment', icon: Codicon.comment },
 	] as const;

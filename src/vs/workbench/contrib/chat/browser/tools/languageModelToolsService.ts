@@ -162,7 +162,7 @@ export class LanguageModelToolsService extends Disposable implements ILanguageMo
 			VSCodeToolReference.vscode,
 			{
 				icon: ThemeIcon.fromId(Codicon.vscode.id),
-				description: localize('copilot.toolSet.vscode.description', 'Use VS Code features'),
+				description: localize('copilot.toolSet.vscode.description', 'Use CogniAI features'),
 			}
 		));
 
@@ -173,7 +173,7 @@ export class LanguageModelToolsService extends Disposable implements ILanguageMo
 			SpecedToolAliases.execute,
 			{
 				icon: ThemeIcon.fromId(Codicon.terminal.id),
-				description: localize('copilot.toolSet.execute.description', 'Execute code and applications on your machine'),
+				description: localize('copilot.toolSet.execute.description', 'Execute code and applications via CogniAI'),
 			}
 		));
 
@@ -184,7 +184,7 @@ export class LanguageModelToolsService extends Disposable implements ILanguageMo
 			SpecedToolAliases.read,
 			{
 				icon: ThemeIcon.fromId(Codicon.book.id),
-				description: localize('copilot.toolSet.read.description', 'Read files in your workspace'),
+				description: localize('copilot.toolSet.read.description', 'Read files in your workspace with CogniAI'),
 			}
 		));
 
@@ -195,7 +195,7 @@ export class LanguageModelToolsService extends Disposable implements ILanguageMo
 			SpecedToolAliases.agent,
 			{
 				icon: ThemeIcon.fromId(Codicon.agent.id),
-				description: localize('copilot.toolSet.agent.description', 'Delegate tasks to other agents'),
+				description: localize('copilot.toolSet.agent.description', 'Delegate tasks to other CogniAI agents'),
 			}
 		));
 	}

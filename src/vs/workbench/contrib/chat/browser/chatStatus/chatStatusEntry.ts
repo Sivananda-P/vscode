@@ -105,8 +105,8 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 	}
 
 	private getEntryProps(): IStatusbarEntry {
-		let text = '$(copilot)';
-		let ariaLabel = localize('chatStatusAria', "Copilot status");
+		let text = '$(sparkle)';
+		let ariaLabel = localize('chatStatusAria', "CogniAI status");
 		let kind: StatusbarEntryKind | undefined;
 
 		if (isNewUser(this.chatEntitlementService)) {
@@ -121,7 +121,7 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 			) {
 				const finishSetup = localize('finishSetup', "Finish Setup");
 
-				text = `$(copilot) ${finishSetup}`;
+				text = `$(sparkle) ${finishSetup}`;
 				ariaLabel = finishSetup;
 				kind = 'prominent';
 			}
@@ -131,13 +131,13 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 
 			// Disabled
 			if (this.chatEntitlementService.sentiment.disabled || this.chatEntitlementService.sentiment.untrusted) {
-				text = '$(copilot-unavailable)';
-				ariaLabel = localize('copilotDisabledStatus', "Copilot disabled");
+				text = '$(sparkle)';
+				ariaLabel = localize('copilotDisabledStatus', "CogniAI disabled");
 			}
 
 			// Sessions in progress
 			else if (this.runningSessionsCount > 0) {
-				text = '$(copilot-in-progress)';
+				text = '$(loading~spin)';
 				if (this.runningSessionsCount > 1) {
 					ariaLabel = localize('chatSessionsInProgressStatus', "{0} agent sessions in progress", this.runningSessionsCount);
 				} else {
@@ -149,7 +149,7 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 			else if (this.chatEntitlementService.entitlement === ChatEntitlement.Unknown) {
 				const signedOutWarning = localize('notSignedIn', "Signed out");
 
-				text = `${this.chatEntitlementService.anonymous ? '$(copilot)' : '$(copilot-not-connected)'} ${signedOutWarning}`;
+				text = `${this.chatEntitlementService.anonymous ? '$(sparkle)' : '$(sparkle)'} ${signedOutWarning}`;
 				ariaLabel = signedOutWarning;
 				kind = 'prominent';
 			}
@@ -165,26 +165,26 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 					quotaWarning = localize('chatAndCompletionsQuotaExceededStatus', "Quota reached");
 				}
 
-				text = `$(copilot-warning) ${quotaWarning}`;
+				text = `$(chat-sparkle-warning) ${quotaWarning}`;
 				ariaLabel = quotaWarning;
 				kind = 'prominent';
 			}
 
 			// Completions Disabled
 			else if (this.editorService.activeTextEditorLanguageId && !isCompletionsEnabled(this.configurationService, this.editorService.activeTextEditorLanguageId)) {
-				text = '$(copilot-unavailable)';
+				text = '$(sparkle)';
 				ariaLabel = localize('completionsDisabledStatus', "Inline suggestions disabled");
 			}
 
 			// Completions Snoozed
 			else if (this.completionsService.isSnoozing()) {
-				text = '$(copilot-snooze)';
+				text = '$(sparkle)';
 				ariaLabel = localize('completionsSnoozedStatus', "Inline suggestions snoozed");
 			}
 		}
 
 		const baseResult = {
-			name: localize('chatStatus', "Copilot Status"),
+			name: localize('chatStatus', "CogniAI Status"),
 			text,
 			ariaLabel,
 			command: ShowTooltipCommand,

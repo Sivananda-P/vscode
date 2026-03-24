@@ -674,7 +674,7 @@ export function registerChatActions() {
 			super({
 				id: ACTION_ID_OPEN_CHAT + '.copilotIcon',
 				title: localize2('interactiveSession.open', "New Chat Editor"),
-				icon: Codicon.copilot,
+				icon: Codicon.sparkle,
 				f1: false,
 				category: CHAT_CATEGORY,
 				precondition: ChatContextKeys.enabled,
@@ -1199,7 +1199,7 @@ export function registerChatActions() {
 				},
 				buttons: [
 					{
-						label: free ? localize('upgradePro', "Upgrade to GitHub Copilot Pro") : localize('upgradePlan', "Upgrade GitHub Copilot Plan"),
+						label: free ? localize('upgradePro', "Upgrade to CogniAI Pro") : localize('upgradePlan', "Upgrade CogniAI Plan"),
 						run: () => {
 							const commandId = 'workbench.action.chat.upgradePlan';
 							telemetryService.publicLog2<WorkbenchActionExecutedEvent, WorkbenchActionExecutedClassification>('workbenchActionExecuted', { id: commandId, from: 'chat-dialog' });
@@ -1208,7 +1208,7 @@ export function registerChatActions() {
 					},
 				],
 				custom: {
-					icon: Codicon.copilotWarningLarge,
+					icon: Codicon.warning,
 					markdownDetails: coalesce([
 						{ markdown: new MarkdownString(message, true) },
 						upgradeToPro ? { markdown: new MarkdownString(upgradeToPro, true) } : undefined

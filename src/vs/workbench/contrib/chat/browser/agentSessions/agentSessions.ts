@@ -19,13 +19,15 @@ export enum AgentSessionProviders {
 	Claude = 'claude-code',
 	Codex = 'openai-codex',
 	Growth = 'copilot-growth',
+	CogniAI = 'cogniai',
 }
 
 export function isBuiltInAgentSessionProvider(provider: string): boolean {
 	return provider === AgentSessionProviders.Local ||
 		provider === AgentSessionProviders.Background ||
 		provider === AgentSessionProviders.Cloud ||
-		provider === AgentSessionProviders.Claude;
+		provider === AgentSessionProviders.Claude ||
+		provider === AgentSessionProviders.CogniAI;
 }
 
 export function getAgentSessionProvider(sessionResource: URI | string): AgentSessionProviders | undefined {
@@ -36,6 +38,7 @@ export function getAgentSessionProvider(sessionResource: URI | string): AgentSes
 		case AgentSessionProviders.Cloud:
 		case AgentSessionProviders.Claude:
 		case AgentSessionProviders.Codex:
+		case AgentSessionProviders.CogniAI:
 			return type;
 		default:
 			return undefined;
@@ -62,6 +65,8 @@ export function getAgentSessionProviderName(provider: AgentSessionProviders): st
 			return 'Codex';
 		case AgentSessionProviders.Growth:
 			return 'Growth';
+		case AgentSessionProviders.CogniAI:
+			return 'CogniAI';
 	}
 }
 
@@ -79,6 +84,8 @@ export function getAgentSessionProviderIcon(provider: AgentSessionProviders): Th
 			return Codicon.claude;
 		case AgentSessionProviders.Growth:
 			return Codicon.lightbulb;
+		case AgentSessionProviders.CogniAI:
+			return Codicon.sparkle;
 	}
 }
 
@@ -87,6 +94,7 @@ export function isFirstPartyAgentSessionProvider(provider: AgentSessionProviders
 		case AgentSessionProviders.Local:
 		case AgentSessionProviders.Background:
 		case AgentSessionProviders.Cloud:
+		case AgentSessionProviders.CogniAI:
 			return true;
 		case AgentSessionProviders.Claude:
 		case AgentSessionProviders.Codex:
@@ -100,6 +108,7 @@ export function getAgentCanContinueIn(provider: AgentSessionProviders): boolean 
 		case AgentSessionProviders.Local:
 		case AgentSessionProviders.Background:
 		case AgentSessionProviders.Cloud:
+		case AgentSessionProviders.CogniAI:
 			return true;
 		case AgentSessionProviders.Claude:
 		case AgentSessionProviders.Codex:
@@ -113,15 +122,17 @@ export function getAgentSessionProviderDescription(provider: AgentSessionProvide
 		case AgentSessionProviders.Local:
 			return localize('chat.session.providerDescription.local', "Run tasks within VS Code chat. The agent iterates via chat and works interactively to implement changes on your main workspace.");
 		case AgentSessionProviders.Background:
-			return localize('chat.session.providerDescription.background', "Delegate tasks to a background agent running locally on your machine. The agent iterates via chat and works asynchronously in a Git worktree to implement changes isolated from your main workspace using the GitHub Copilot CLI.");
+			return localize('chat.session.providerDescription.background', "Delegate tasks to a background agent running locally on your machine. The agent iterates via chat and works asynchronously in a Git worktree to implement changes isolated from your main workspace using the CogniAI CLI.");
 		case AgentSessionProviders.Cloud:
-			return localize('chat.session.providerDescription.cloud', "Delegate tasks to the GitHub Copilot coding agent. The agent iterates via chat and works asynchronously in the cloud to implement changes and pull requests as needed.");
+			return localize('chat.session.providerDescription.cloud', "Delegate tasks to the CogniAI coding agent. The agent iterates via chat and works asynchronously in the cloud to implement changes and pull requests as needed.");
 		case AgentSessionProviders.Claude:
-			return localize('chat.session.providerDescription.claude', "Delegate tasks to the Claude Agent SDK using the Claude models included in your GitHub Copilot subscription. The agent iterates via chat and works interactively to implement changes on your main workspace.");
+			return localize('chat.session.providerDescription.claude', "Delegate tasks to the Claude Agent SDK using the Claude models included in your CogniAI subscription. The agent iterates via chat and works interactively to implement changes on your main workspace.");
 		case AgentSessionProviders.Codex:
 			return localize('chat.session.providerDescription.codex', "Opens a new Codex session in the editor. Codex sessions can be managed from the chat sessions view.");
 		case AgentSessionProviders.Growth:
-			return localize('chat.session.providerDescription.growth', "Learn about Copilot features.");
+			return localize('chat.session.providerDescription.growth', "Learn about CogniAI features.");
+		case AgentSessionProviders.CogniAI:
+			return localize('chat.session.providerDescription.cogniai', "Connect to the CogniAI agent for advanced reasoning and coding assistance.");
 	}
 }
 

@@ -976,7 +976,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				let additionalMessage: string | IMarkdownString | undefined;
 				if (this.chatEntitlementService.anonymous && !this.chatEntitlementService.sentiment.installed) {
 					const providers = product.defaultChatAgent.provider;
-					additionalMessage = new MarkdownString(localize({ key: 'settings', comment: ['{Locked="]({2})"}', '{Locked="]({3})"}'] }, "By continuing with {0} Copilot, you agree to {1}'s [Terms]({2}) and [Privacy Statement]({3}).", providers.default.name, providers.default.name, product.defaultChatAgent.termsStatementUrl, product.defaultChatAgent.privacyStatementUrl), { isTrusted: true });
+					additionalMessage = new MarkdownString(localize({ key: 'settings', comment: ['{Locked="]({2})"}', '{Locked="]({3})"}'] }, "By continuing with {0} CogniAI, you agree to {1}'s [Terms]({2}) and [Privacy Statement]({3}).", providers.default.name, providers.default.name, product.defaultChatAgent.termsStatementUrl, product.defaultChatAgent.privacyStatementUrl), { isTrusted: true });
 				} else {
 					additionalMessage = defaultAgent?.metadata.additionalWelcomeMessage;
 				}
@@ -1104,7 +1104,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			const message = providerMessage
 				? new MarkdownString(providerMessage)
 				: (this._lockedAgent?.prefix === '@copilot '
-					? new MarkdownString(localize('copilotCodingAgentMessage', "This chat session will be forwarded to the {0} [coding agent]({1}) where work is completed in the background. ", this._lockedAgent.prefix, 'https://aka.ms/coding-agent-docs') + DISCLAIMER, { isTrusted: true })
+					? new MarkdownString(localize('copilotCodingAgentMessage', "This chat session will be forwarded to the CogniAI [coding agent]({1}) where work is completed in the background. ", this._lockedAgent.prefix, 'https://aka.ms/coding-agent-docs') + DISCLAIMER, { isTrusted: true })
 					: new MarkdownString(localize('genericCodingAgentMessage', "This chat session will be forwarded to the {0} coding agent where work is completed in the background. ", this._lockedAgent?.prefix) + DISCLAIMER));
 
 			return {
