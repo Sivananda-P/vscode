@@ -1,0 +1,24 @@
+ services:
+  ai-backend:
+    build:
+      context: ./ai-backend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+
+  ide:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=development
+      - PORT=8080
+      - AI_BACKEND_URL=http://ai-backend:3000
+    depends_on:
+      - ai-backend
+    restart: unless-stopped
